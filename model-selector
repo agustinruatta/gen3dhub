@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Launcher for model-selector.
+#
+# Bootstraps the project venv on first run (via `uv sync`) and then forwards
+# every argument to the underlying `model-selector` CLI.
+#
+# Usage:
+#   ./model-selector                     # interactive menu (TUI)
+#   ./model-selector run                 # interactive prompts
+#   ./model-selector run -m stable-fast-3d -i cat.png -o cat.glb -y
+#   ./model-selector list
+#   ./model-selector doctor
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+cd "$SCRIPT_DIR"
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "error: 'uv' is not installed or not on PATH." >&2
+    echo "       Install it from https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 127
+fi
+
+# Bootstrap on first run (or whenever pyproject.toml has changed since last sync).
+STAMP=".venv/.bootstrap-stamp"
+if [[ ! -d ".venv" ]] || [[ ! -f "$STAMP" ]] || [[ "pyproject.toml" -nt "$STAMP" ]]; then
+    echo "→ Syncing dependencies (first run or pyproject changed)…" >&2
+    uv sync --quiet
+    touch "$STAMP"
+fi
+
+exec uv run --quiet model-selector "$@"

@@ -27,10 +27,11 @@ from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     DirectoryTree,
     Footer,
@@ -43,6 +44,7 @@ from textual.widgets import (
     Static,
 )
 
+from gen3dhub import __version__
 from gen3dhub.config import Paths
 from gen3dhub.console import error
 from gen3dhub.models.base import InputKind, RunRequest
@@ -77,7 +79,7 @@ class MenuScreen(Screen):
     }
     MenuScreen #menu {
         width: 60;
-        height: 9;
+        height: 11;
         border: round $primary;
     }
     MenuScreen #menu-hint {
@@ -96,6 +98,7 @@ class MenuScreen(Screen):
             ListItem(Label("Set up a model"), id="opt-setup"),
             ListItem(Label("Run inference"), id="opt-run"),
             ListItem(Label("Run diagnostics (doctor)"), id="opt-doctor"),
+            ListItem(Label("View agent / scripting guide"), id="opt-agent"),
             ListItem(Label("Quit"), id="opt-quit"),
             id="menu",
         )
@@ -112,6 +115,8 @@ class MenuScreen(Screen):
             self.app.push_screen(RunScreen())
         elif item_id == "opt-doctor":
             self.app.push_screen(DoctorScreen())
+        elif item_id == "opt-agent":
+            self.app.push_screen(AgentGuideScreen())
         elif item_id == "opt-quit":
             self.app.exit()
 
@@ -480,6 +485,11 @@ class RunScreen(_BackableScreen):
                 Button("Browse…", id="run-browse-output"),
                 classes="path-row",
             ),
+            Checkbox(
+                "Install model automatically if not installed yet",
+                value=True,
+                id="run-auto-setup",
+            ),
             Horizontal(
                 Button("Run", variant="primary", id="run-go"),
                 id="run-buttons",
@@ -519,18 +529,27 @@ class RunScreen(_BackableScreen):
             self.notify(f"Missing required inputs: {', '.join(missing)}", severity="error")
             return
 
+        auto_setup = self.query_one("#run-auto-setup", Checkbox).value
+
         request = RunRequest(
             inputs=inputs,
             output_path=Path(output).expanduser() if output else None,
         )
-        self._run_inference(adapter, request)
+        self._run_inference(adapter, request, auto_setup=auto_setup)
 
-    def _run_inference(self, adapter, request: RunRequest) -> None:
+    def _run_inference(self, adapter, request: RunRequest, *, auto_setup: bool) -> None:
         with self.app.suspend():
             try:
                 if not adapter.is_installed:
-                    print(f"'{adapter.model_id}' is not installed. Running setup first…\n")
-                    adapter.setup()
+                    if auto_setup:
+                        print(f"'{adapter.model_id}' is not installed. Running setup first…\n")
+                        adapter.setup()
+                    else:
+                        raise RuntimeError(
+                            f"Model '{adapter.model_id}' is not installed and auto-setup is "
+                            f"disabled. Either tick the checkbox, run Setup from the menu, or "
+                            f"call `gen3dhub setup --model {adapter.model_id}` from the shell."
+                        )
                 adapter.run(request)
             except Exception as exc:
                 error(str(exc))
@@ -615,6 +634,55 @@ class DoctorScreen(_BackableScreen):
 
 
 # ---------------------------------------------------------------------------
+# Agent / scripting guide
+# ---------------------------------------------------------------------------
+
+
+class AgentGuideScreen(Screen):
+    """Read-only scrollable view of the same text printed by `gen3dhub agent`.
+
+    Useful when the user wants to see the non-interactive contract from inside
+    the TUI (e.g. to copy a command into a terminal or share with a teammate
+    automating the tool). Doesn't inherit from _BackableScreen because that
+    class hijacks Down/Up for focus traversal — here we want them to scroll
+    the guide content instead.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "app.pop_screen", "Back"),
+        Binding("q", "app.pop_screen", "Back"),
+        Binding("ctrl+c", "app.quit", "Quit", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    AgentGuideScreen #agent-body {
+        padding: 1 2;
+        height: 1fr;
+    }
+    AgentGuideScreen #agent-text {
+        padding: 1 0;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        from gen3dhub.agent_guide import AGENT_GUIDE
+
+        yield Header(show_clock=False)
+        yield VerticalScroll(
+            Static(
+                "[b]Agent / scripting guide[/b]  "
+                "[dim](same text as `gen3dhub agent`)[/dim]"
+            ),
+            Static(AGENT_GUIDE, id="agent-text", markup=False),
+            id="agent-body",
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#agent-body", VerticalScroll).focus()
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -623,7 +691,7 @@ class ModelSelectorApp(App[None]):
     """Persistent Textual TUI. Stays open until the user explicitly quits."""
 
     TITLE = "gen3dhub"
-    SUB_TITLE = "Run AI models from one place"
+    SUB_TITLE = f"Hub for 3D-gen AI models · v{__version__}"
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),

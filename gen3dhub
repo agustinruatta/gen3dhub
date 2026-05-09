@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Launcher for model-selector.
+# Launcher for gen3dhub.
 #
 # Bootstraps the project venv on first run (via `uv sync`) and then forwards
-# every argument to the underlying `model-selector` CLI.
+# every argument to the underlying `gen3dhub` CLI.
 #
 # Usage:
-#   ./model-selector                     # interactive menu (TUI)
-#   ./model-selector run                 # interactive prompts
-#   ./model-selector run -m stable-fast-3d -i cat.png -o cat.glb -y
-#   ./model-selector list
-#   ./model-selector doctor
+#   ./gen3dhub                     # interactive menu (TUI)
+#   ./gen3dhub run                 # interactive prompts
+#   ./gen3dhub run -m stable-fast-3d -i cat.png -o cat.glb -y
+#   ./gen3dhub list
+#   ./gen3dhub doctor
 
 set -euo pipefail
 
@@ -30,4 +30,4 @@ if [[ ! -d ".venv" ]] || [[ ! -f "$STAMP" ]] || [[ "pyproject.toml" -nt "$STAMP"
     touch "$STAMP"
 fi
 
-exec uv run --quiet model-selector "$@"
+exec uv run --quiet gen3dhub "$@"

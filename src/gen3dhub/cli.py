@@ -1,15 +1,15 @@
-"""Typer CLI entry point — `model-selector` command.
+"""Typer CLI entry point — `gen3dhub` command.
 
 Designed to be fully usable in two modes:
 
 1. Non-interactive (for AI agents and scripts): every option can be passed via flags.
    Examples:
-       model-selector list
-       model-selector setup --model stable-fast-3d
-       model-selector run --model stable-fast-3d --image cat.png --output cat.glb
-       model-selector doctor --model stable-fast-3d
+       gen3dhub list
+       gen3dhub setup --model stable-fast-3d
+       gen3dhub run --model stable-fast-3d --image cat.png --output cat.glb
+       gen3dhub doctor --model stable-fast-3d
 
-2. Interactive (for humans): running `model-selector` with no command opens a menu;
+2. Interactive (for humans): running `gen3dhub` with no command opens a menu;
    running a command with missing required args triggers questionary prompts.
 """
 
@@ -22,15 +22,15 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from model_selector import __version__, tui
-from model_selector.config import Paths
-from model_selector.console import console, error, info, success
-from model_selector.models.base import ModelInfo, RunRequest
-from model_selector.registry import get_adapter, known_model_ids, list_models
+from gen3dhub import __version__, tui
+from gen3dhub.config import Paths
+from gen3dhub.console import console, error, info, success
+from gen3dhub.models.base import ModelInfo, RunRequest
+from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
 app = typer.Typer(
-    name="model-selector",
-    help="Download, configure, and run AI models from a single CLI/TUI.",
+    name="gen3dhub",
+    help="Hub for AI models that generate 3D assets — download, configure, and run.",
     no_args_is_help=False,
     add_completion=False,
 )
@@ -38,7 +38,7 @@ app = typer.Typer(
 
 def _version_callback(value: bool) -> None:
     if value:
-        console.print(f"model-selector {__version__}")
+        console.print(f"gen3dhub {__version__}")
         raise typer.Exit()
 
 
@@ -120,7 +120,7 @@ def doctor_command(
     ] = None,
 ) -> None:
     """Verify environment, dependencies, and authentication for one or all models."""
-    from model_selector.utils.system import system_summary
+    from gen3dhub.utils.system import system_summary
 
     paths = Paths.default()
     paths.ensure()
@@ -196,7 +196,7 @@ def run_command(
         if auto_setup and (yes or tui.confirm(f"'{model_id}' is not installed. Install now?")):
             adapter.setup()
         else:
-            error(f"Model '{model_id}' is not installed. Run: model-selector setup -m {model_id}")
+            error(f"Model '{model_id}' is not installed. Run: gen3dhub setup -m {model_id}")
             raise typer.Exit(code=1)
 
     inputs = _resolve_inputs(model_info, image=image, text=text)
@@ -260,14 +260,14 @@ def _resolve_output(
 
 def _launch_tui() -> None:
     """Launch the persistent Textual TUI. Imported lazily to keep startup fast."""
-    from model_selector.tui_app import run as run_tui
+    from gen3dhub.tui_app import run as run_tui
 
     run_tui()
 
 
 @app.command("tui")
 def tui_command() -> None:
-    """Launch the persistent interactive TUI. Same as running `model-selector` with no command."""
+    """Launch the persistent interactive TUI. Same as running `gen3dhub` with no command."""
     _launch_tui()
 
 

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import questionary
 
-from model_selector.models.base import InputKind, ModelInfo
-from model_selector.registry import list_models
+from gen3dhub.models.base import InputKind, ModelInfo
+from gen3dhub.registry import list_models
 
 
 def select_model(prompt: str = "Which model do you want to use?") -> str:

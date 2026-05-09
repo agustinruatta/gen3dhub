@@ -1,10 +1,12 @@
-# Model Selector
+# gen3dhub
 
-A console application — usable both as an interactive TUI **and** as a flag-driven
-CLI — that downloads, configures, and runs AI models with a uniform interface.
+A console hub for AI models that generate 3D assets — image-to-3D, text-to-3D,
+and similar. Usable both as an interactive TUI and as a flag-driven CLI, with
+a uniform interface across models.
 
-Each model is installed into its own isolated virtual environment so models with
-incompatible dependency trees coexist on the same machine without conflict.
+Each model is installed into its own isolated virtual environment so models
+with incompatible dependency trees (different PyTorch versions, custom CUDA
+extensions, etc.) coexist on the same machine without conflict.
 
 ## Supported models
 
@@ -34,7 +36,7 @@ below). The CLI surface does not need to change.
 Some adapters (currently Stable Fast 3D) build C/C++ extensions during
 installation, so the host needs a working toolchain. The tool detects this
 automatically and refuses to start the install with a clear error if anything
-is missing — `model-selector doctor` shows the exact problem and a
+is missing — `gen3dhub doctor` shows the exact problem and a
 copy-pasteable command for your distro.
 
 | Distro family            | One-time install                                                |
@@ -62,8 +64,8 @@ automatically — slower, but works the same on any distro.
 ## Installation
 
 ```bash
-git clone <this-repo> model-selector
-cd model-selector
+git clone <this-repo> gen3dhub
+cd gen3dhub
 ```
 
 There are three ways to launch the tool:
@@ -71,11 +73,11 @@ There are three ways to launch the tool:
 **1. Launcher script (easiest — auto-bootstraps on first run):**
 
 ```bash
-./model-selector --help
-./model-selector            # interactive TUI menu
+./gen3dhub --help
+./gen3dhub            # interactive TUI menu
 ```
 
-The `./model-selector` shell script in the project root runs `uv sync` the
+The `./gen3dhub` shell script in the project root runs `uv sync` the
 first time (or whenever `pyproject.toml` changes) and then forwards every
 argument to the CLI. Nothing else to set up.
 
@@ -83,14 +85,14 @@ argument to the CLI. Nothing else to set up.
 
 ```bash
 uv sync
-uv run model-selector --help
+uv run gen3dhub --help
 ```
 
 **3. Installed globally as a `uv` tool:**
 
 ```bash
 uv tool install .
-model-selector --help
+gen3dhub --help
 ```
 
 ## Usage
@@ -105,8 +107,8 @@ There are two distinct ways to drive the tool:
 ### TUI (interactive)
 
 ```bash
-./model-selector              # opens the TUI
-./model-selector tui          # explicit equivalent
+./gen3dhub              # opens the TUI
+./gen3dhub tui          # explicit equivalent
 ```
 
 Keybindings:
@@ -135,7 +137,7 @@ convenient for scripting and AI agents — or omitted to trigger interactive
 ### `list` — show available models
 
 ```bash
-model-selector list
+gen3dhub list
 ```
 
 ### `setup` — install a model
@@ -145,27 +147,27 @@ installs pinned dependencies into it, and verifies the install.
 
 ```bash
 # Non-interactive
-model-selector setup --model stable-fast-3d
+gen3dhub setup --model stable-fast-3d
 
 # Reinstall from scratch
-model-selector setup --model stable-fast-3d --force
+gen3dhub setup --model stable-fast-3d --force
 
 # Interactive: prompts you to pick a model
-model-selector setup
+gen3dhub setup
 ```
 
 ### `run` — execute inference
 
 ```bash
 # Non-interactive (preferred for AI agents and scripts)
-model-selector run \
+gen3dhub run \
     --model stable-fast-3d \
     --image path/to/photo.png \
     --output path/to/result.glb \
     --yes
 
 # Interactive: omit any flag and you'll be prompted
-model-selector run
+gen3dhub run
 ```
 
 Flags:
@@ -187,10 +189,10 @@ acceptance.
 
 ```bash
 # Check everything
-model-selector doctor
+gen3dhub doctor
 
 # Check a single model
-model-selector doctor --model stable-fast-3d
+gen3dhub doctor --model stable-fast-3d
 ```
 
 Exits non-zero if any check fails — useful in CI and as a precondition in agent
@@ -198,12 +200,12 @@ workflows.
 
 ### `tui` — explicit TUI launcher
 
-Same as running `model-selector` with no subcommand. Documented above.
+Same as running `gen3dhub` with no subcommand. Documented above.
 
 ## How it works
 
 ```
-~/.cache/model-selector/                  (overridable via MODEL_SELECTOR_CACHE_DIR)
+~/.cache/gen3dhub/                  (overridable via GEN3DHUB_CACHE_DIR)
 └── models/
     └── <model-id>/
         ├── repo/        # cloned source repository, checked out at a pinned commit
@@ -214,7 +216,7 @@ Same as running `model-selector` with no subcommand. Documented above.
 Model weights are downloaded by each model's own machinery into Hugging Face's
 standard cache (`~/.cache/huggingface`).
 
-The host process running `model-selector` itself stays light: it only depends on
+The host process running `gen3dhub` itself stays light: it only depends on
 `typer`, `rich`, `textual`, `questionary`, `huggingface-hub`, and `pillow`. Heavy
 dependencies (PyTorch, custom CUDA kernels, model code) live in the per-model
 virtualenvs and are invoked through `subprocess`.
@@ -233,7 +235,7 @@ Each adapter pins:
 
 To upgrade a model deliberately, edit the constants at the top of the adapter
 (`_REPO_COMMIT`, `_TORCH_PACKAGES`, etc.) and run
-`model-selector setup --model <id> --force`.
+`gen3dhub setup --model <id> --force`.
 
 ### Build isolation note (SF3D and similar models)
 
@@ -260,13 +262,13 @@ Use the **non-interactive flag-driven form**. Recommended pattern:
 
 ```bash
 # 1. Confirm the model is healthy. Exits non-zero if not.
-model-selector doctor --model stable-fast-3d || exit 1
+gen3dhub doctor --model stable-fast-3d || exit 1
 
 # 2. Install on demand if needed (idempotent).
-model-selector setup --model stable-fast-3d
+gen3dhub setup --model stable-fast-3d
 
 # 3. Run inference with all inputs supplied as flags + --yes to suppress prompts.
-model-selector run --model stable-fast-3d \
+gen3dhub run --model stable-fast-3d \
     --image /tmp/input.png \
     --output /tmp/output.glb \
     --yes
@@ -277,24 +279,24 @@ The `run` subcommand exits 0 on success and prints the output path on the last
 
 ## Adding a model
 
-Each adapter is a single file in `src/model_selector/models/`.
+Each adapter is a single file in `src/gen3dhub/models/`.
 
-1. Subclass `ModelAdapter` from `model_selector.models.base`.
+1. Subclass `ModelAdapter` from `gen3dhub.models.base`.
 2. Define the `info` class attribute (`ModelInfo`): id, display name, summary,
    homepage, license URL, declared `InputSpec`s, and the produced file
    extension.
 3. Implement `setup(force: bool)`, `verify() -> list[str]`, and
    `run(request: RunRequest) -> Path`.
-4. Register the adapter in `src/model_selector/registry.py`.
+4. Register the adapter in `src/gen3dhub/registry.py`.
 
 The `stable-fast-3d` adapter
-(`src/model_selector/models/stable_fast_3d.py`) is the canonical example — it
+(`src/gen3dhub/models/stable_fast_3d.py`) is the canonical example — it
 covers cloning a source repo, creating a `uv` venv, installing dependencies,
 verifying Hugging Face authentication, and shelling out for inference.
 
 ## Environment variables
 
-- `MODEL_SELECTOR_CACHE_DIR` — override the location of the cache root.
+- `GEN3DHUB_CACHE_DIR` — override the location of the cache root.
 - `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face auth token. Required for
   gated models.
 

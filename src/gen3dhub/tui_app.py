@@ -1,4 +1,4 @@
-"""Persistent Textual TUI for Model Selector.
+"""Persistent Textual TUI for gen3dhub.
 
 Layout:
     MenuScreen (top-level)
@@ -43,10 +43,10 @@ from textual.widgets import (
     Static,
 )
 
-from model_selector.config import Paths
-from model_selector.console import error
-from model_selector.models.base import InputKind, RunRequest
-from model_selector.registry import get_adapter, known_model_ids, list_models
+from gen3dhub.config import Paths
+from gen3dhub.console import error
+from gen3dhub.models.base import InputKind, RunRequest
+from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
 _ALL_TARGETS = "__all__"
 
@@ -90,7 +90,7 @@ class MenuScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static("[b]Model Selector[/b]", id="menu-title")
+        yield Static("[b]gen3dhub[/b]", id="menu-title")
         yield ListView(
             ListItem(Label("List supported models"), id="opt-list"),
             ListItem(Label("Set up a model"), id="opt-setup"),
@@ -622,7 +622,7 @@ class DoctorScreen(_BackableScreen):
 class ModelSelectorApp(App[None]):
     """Persistent Textual TUI. Stays open until the user explicitly quits."""
 
-    TITLE = "Model Selector"
+    TITLE = "gen3dhub"
     SUB_TITLE = "Run AI models from one place"
 
     BINDINGS: ClassVar[list[Binding]] = [

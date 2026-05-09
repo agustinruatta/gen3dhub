@@ -1,6 +1,6 @@
 """Cross-distro system checks (compiler, headers, etc.) and install hints.
 
-The Python side of Model Selector is portable thanks to uv-managed venvs, but
+The Python side of gen3dhub is portable thanks to uv-managed venvs, but
 some adapters (e.g. Stable Fast 3D) compile C/C++ extensions from source and
 need a working host toolchain. The helpers here detect what's missing and
 print a distro-aware command the user can copy-paste to install it.

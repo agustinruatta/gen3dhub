@@ -12,16 +12,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-from model_selector.console import info, success, warn
-from model_selector.models.base import (
+from gen3dhub.console import info, success, warn
+from gen3dhub.models.base import (
     InputKind,
     InputSpec,
     ModelAdapter,
     ModelInfo,
     RunRequest,
 )
-from model_selector.utils.process import run_streaming
-from model_selector.utils.system import check_build_toolchain
+from gen3dhub.utils.process import run_streaming
+from gen3dhub.utils.system import check_build_toolchain
 
 _REPO_URL = "https://github.com/Stability-AI/stable-fast-3d.git"
 # Pinned for reproducibility. Bump deliberately when upgrading.
@@ -171,7 +171,7 @@ class StableFast3DAdapter(ModelAdapter):
         problems.extend(check_build_toolchain())
 
         if not self.is_installed:
-            problems.append("Not installed. Run: model-selector setup --model stable-fast-3d")
+            problems.append("Not installed. Run: gen3dhub setup --model stable-fast-3d")
             return problems
 
         repo_dir = self.paths.model_repo_dir(self.model_id)

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from model_selector.config import Paths
+from gen3dhub.config import Paths
 
 
 class InputKind(StrEnum):

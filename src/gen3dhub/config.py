@@ -1,4 +1,4 @@
-"""Filesystem layout and global configuration for Model Selector."""
+"""Filesystem layout and global configuration for gen3dhub."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ class Paths:
 
     @classmethod
     def default(cls) -> Paths:
-        override = os.environ.get("MODEL_SELECTOR_CACHE_DIR")
-        root = Path(override).expanduser() if override else _xdg_cache_home() / "model-selector"
+        override = os.environ.get("GEN3DHUB_CACHE_DIR")
+        root = Path(override).expanduser() if override else _xdg_cache_home() / "gen3dhub"
         return cls(cache_root=root)
 
     @property

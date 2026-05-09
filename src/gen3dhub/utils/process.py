@@ -6,7 +6,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from model_selector.console import console, err_console
+from gen3dhub.console import console, err_console
 
 
 class CommandError(RuntimeError):

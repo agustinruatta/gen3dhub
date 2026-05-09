@@ -30,7 +30,15 @@ from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
 app = typer.Typer(
     name="gen3dhub",
-    help="Hub for AI models that generate 3D assets — download, configure, and run.",
+    help=(
+        "Hub for AI models that generate 3D assets — download, configure, and run.\n\n"
+        "AGENT QUICKSTART (non-interactive):\n"
+        "  gen3dhub doctor                                  # exit 0 if healthy\n"
+        "  gen3dhub setup --model <id>                      # one-time install\n"
+        "  gen3dhub run --model <id> --image <p> --output <q> --yes\n\n"
+        "Run `gen3dhub agent` for the full agent-oriented usage guide.\n"
+        "Run `gen3dhub <cmd> --help` for per-subcommand flags."
+    ),
     no_args_is_help=False,
     add_completion=False,
 )
@@ -269,6 +277,20 @@ def _launch_tui() -> None:
 def tui_command() -> None:
     """Launch the persistent interactive TUI. Same as running `gen3dhub` with no command."""
     _launch_tui()
+
+
+@app.command("agent")
+def agent_command() -> None:
+    """Print a comprehensive usage guide aimed at AI agents and scripts.
+
+    Plain text only — meant to be piped to an agent's context window or read
+    by a human looking for the "how do I drive this non-interactively" answer.
+    """
+    from gen3dhub.agent_guide import AGENT_GUIDE
+
+    # Print directly (not via Rich console) so there's no ANSI styling and
+    # the output is identical when piped to a file or another process.
+    print(AGENT_GUIDE)
 
 
 if __name__ == "__main__":

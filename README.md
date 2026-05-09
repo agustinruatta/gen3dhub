@@ -88,12 +88,36 @@ uv sync
 uv run gen3dhub --help
 ```
 
-**3. Installed globally as a `uv` tool:**
+**3. Installed globally so you can run `gen3dhub` from anywhere:**
 
 ```bash
-uv tool install .
-gen3dhub --help
+./gen3dhub install         # wraps `uv tool install .`
+gen3dhub --help            # works from any directory
 ```
+
+The `install` subcommand of the launcher uses `uv tool install` under the
+hood: it builds the project into a frozen, isolated environment and drops a
+launcher at `~/.local/bin/gen3dhub`. After running it once, you can call
+`gen3dhub …` from any shell.
+
+If `gen3dhub` is not found after install, ensure the uv tool bin dir is on
+your PATH:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"   # add to ~/.bashrc, ~/.zshrc, etc.
+# or run:
+uv tool update-shell
+```
+
+To remove the global install:
+
+```bash
+./gen3dhub uninstall       # wraps `uv tool uninstall gen3dhub`
+```
+
+To upgrade after a code change in this repo, run `./gen3dhub install` again
+— it passes `--reinstall` to uv tool, so the global copy is replaced with
+the current source.
 
 ## Usage
 
@@ -258,24 +282,53 @@ same pattern.
 
 ## For AI agents calling this tool
 
-Use the **non-interactive flag-driven form**. Recommended pattern:
+The fastest way to onboard an agent: have it run `gen3dhub agent`. That
+prints a complete, plain-text usage guide (purpose, exit codes, env vars,
+gated-model handling, troubleshooting, end-to-end example) intended to be
+piped straight into the agent's context window.
+
+The same guide is also surfaced in `gen3dhub --help` as a short quickstart
+at the top, so an agent that calls `--help` first sees the recommended
+non-interactive workflow without any extra effort.
+
+### Recommended pattern
 
 ```bash
-# 1. Confirm the model is healthy. Exits non-zero if not.
-gen3dhub doctor --model stable-fast-3d || exit 1
+# 1. Confirm the host is healthy. Exits non-zero if not — read stderr for
+#    distro-specific install commands the agent can surface to the user.
+gen3dhub doctor || exit 1
 
 # 2. Install on demand if needed (idempotent).
 gen3dhub setup --model stable-fast-3d
 
-# 3. Run inference with all inputs supplied as flags + --yes to suppress prompts.
+# 3. Run inference. --yes suppresses ALL confirmation prompts.
 gen3dhub run --model stable-fast-3d \
     --image /tmp/input.png \
     --output /tmp/output.glb \
     --yes
 ```
 
-The `run` subcommand exits 0 on success and prints the output path on the last
-`✓` line.
+### Don'ts
+
+- Don't call bare `gen3dhub` or `gen3dhub tui` from an agent — both open
+  the interactive TUI, which requires a TTY and will hang under an agent
+  runner.
+- Don't omit `--yes` on `run` — it may stop on a confirmation prompt.
+- Don't try to invoke the model's underlying script directly. Pinned
+  per-model venvs live under `~/.cache/gen3dhub/models/<id>/.venv` and
+  aren't on PATH; only `gen3dhub run` knows the right invocation.
+
+### Exit code contract
+
+| Code | Meaning                                                      |
+|------|--------------------------------------------------------------|
+| 0    | Success.                                                     |
+| 1    | Precondition failure (toolchain, HF auth, license, etc.).    |
+| 2    | CLI usage error (Typer/Click).                               |
+| >2   | Subprocess error (uv, pip, git, model inference).            |
+
+The `run` subcommand exits 0 on success and prints the output path on the
+last `✓` line.
 
 ## Adding a model
 

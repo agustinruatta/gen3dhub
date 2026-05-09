@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Launcher for gen3dhub.
 #
-# Bootstraps the project venv on first run (via `uv sync`) and then forwards
-# every argument to the underlying `gen3dhub` CLI.
+# Two responsibilities:
+#  1. Bootstrap the project venv (`uv sync`) on first run and forward every
+#     other argument to the underlying `gen3dhub` CLI.
+#  2. Handle the `install` / `uninstall` actions, which install the tool
+#     system-wide via `uv tool install` so `gen3dhub` is reachable from
+#     anywhere on PATH.
 #
 # Usage:
-#   ./gen3dhub                     # interactive menu (TUI)
-#   ./gen3dhub run                 # interactive prompts
+#   ./gen3dhub install              # install onto PATH (~/.local/bin/gen3dhub)
+#   ./gen3dhub uninstall            # remove the global install
+#   ./gen3dhub                      # open the TUI
 #   ./gen3dhub run -m stable-fast-3d -i cat.png -o cat.glb -y
-#   ./gen3dhub list
-#   ./gen3dhub doctor
+#   ./gen3dhub list / doctor / setup / agent   # other CLI commands
 
 set -euo pipefail
 
@@ -21,6 +25,28 @@ if ! command -v uv >/dev/null 2>&1; then
     echo "       Install it from https://docs.astral.sh/uv/getting-started/installation/" >&2
     exit 127
 fi
+
+case "${1:-}" in
+    install|--install)
+        shift
+        echo "Installing gen3dhub system-wide via uv tool install…"
+        uv tool install --reinstall "$SCRIPT_DIR" "$@"
+        echo
+        echo "Done. From a new shell, try: gen3dhub --help"
+        echo
+        echo "If 'gen3dhub' is not found, ensure uv's tool bin dir is on PATH."
+        echo "Add this to your shell rc (~/.bashrc, ~/.zshrc, etc.):"
+        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        echo "Or run:"
+        echo "  uv tool update-shell"
+        exit 0
+        ;;
+    uninstall|--uninstall)
+        echo "Uninstalling gen3dhub from the global tool dir…"
+        uv tool uninstall gen3dhub
+        exit 0
+        ;;
+esac
 
 # Bootstrap on first run (or whenever pyproject.toml has changed since last sync).
 STAMP=".venv/.bootstrap-stamp"

@@ -159,14 +159,27 @@ class _BackableScreen(Screen):
 
 
 class FilePickerScreen(ModalScreen[Path | None]):
-    """Modal with a DirectoryTree, an editable path input, and an Up button.
+    """Modal file/folder picker. Returns the selected absolute Path, or None on cancel.
 
-    Returns the selected absolute path, or None on cancel.
+    Three independent ways to commit a selection:
+      1. Press Enter on a *file* in the tree → dismisses with that file.
+      2. Click "Accept" (or hit Enter on the path Input) → dismisses with whatever
+         path is currently in the path Input. Useful for committing a path that
+         doesn't exist yet (e.g. output filenames the user is about to create)
+         or for picking a directory when allow_directory=True.
+      3. Esc / "Cancel" → dismisses with None.
 
-    The path Input lets the user type any location and press Enter:
-      - if it's a directory → the tree re-roots there
-      - if it's a file (or a path under an existing directory) → the path is
-        committed, even if the file doesn't exist yet (useful for output paths)
+    Tree navigation:
+      - Highlighting a node in the tree mirrors that node's path into the path
+        Input (only when the tree itself has focus, so manual edits to the
+        Input aren't clobbered by an unrelated highlight).
+      - Enter on a *folder* expands it (DirectoryTree default — does NOT dismiss).
+      - "Up" button or Alt+↑ re-roots the tree at the parent directory.
+      - Typing a directory path + Enter on the path Input re-roots the tree there.
+
+    The `allow_directory` flag controls whether Accept will dismiss with a
+    folder path. Image inputs set it False; output paths set it True so the
+    caller can append a filename.
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -208,21 +221,31 @@ class FilePickerScreen(ModalScreen[Path | None]):
         padding: 1 1 0 1;
         align: right middle;
     }
+    FilePickerScreen #picker-footer Button {
+        margin-left: 1;
+    }
     """
 
-    def __init__(self, start_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        start_path: Path | None = None,
+        *,
+        allow_directory: bool = False,
+        title: str = "Pick a file",
+    ) -> None:
         super().__init__()
         self.start_path = (start_path or Path.cwd()).expanduser().resolve()
+        self.allow_directory = allow_directory
+        self.title_text = title
 
     def compose(self) -> ComposeResult:
+        hint = (
+            "↑/↓ navigate tree · Enter expands a folder / picks a file · "
+            "Type or edit the path above · Accept commits · Up / Alt+↑ goes to parent · "
+            "Esc cancels"
+        )
         yield Container(
-            Static(
-                "[b]Pick a file[/b]\n"
-                "[dim]↑/↓ in tree · Enter open folder or select file · "
-                "Type a path + Enter to jump · Up button or Alt+↑ for parent · "
-                "Esc cancel[/dim]",
-                id="picker-header",
-            ),
+            Static(f"[b]{self.title_text}[/b]\n[dim]{hint}[/dim]", id="picker-header"),
             Horizontal(
                 Input(value=str(self.start_path), id="picker-path"),
                 Button("Up", id="picker-up"),
@@ -230,6 +253,7 @@ class FilePickerScreen(ModalScreen[Path | None]):
             ),
             DirectoryTree(str(self.start_path), id="picker-tree"),
             Horizontal(
+                Button("Accept", variant="primary", id="picker-accept"),
                 Button("Cancel", id="picker-cancel"),
                 id="picker-footer",
             ),
@@ -239,21 +263,36 @@ class FilePickerScreen(ModalScreen[Path | None]):
     def on_mount(self) -> None:
         self.query_one(DirectoryTree).focus()
 
-    # ---- tree → return file ----
+    # ---- tree highlight → mirror into path Input ----
+
+    def on_tree_node_highlighted(self, event) -> None:
+        # Only sync when the user is navigating the tree, not when they're
+        # mid-edit in the path Input.
+        if not isinstance(self.focused, DirectoryTree):
+            return
+        node_data = getattr(event.node, "data", None)
+        node_path = getattr(node_data, "path", None)
+        if node_path is None:
+            return
+        self.query_one("#picker-path", Input).value = str(Path(node_path).resolve())
+
+    # ---- tree Enter on a file → dismiss with that file ----
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         self.dismiss(Path(event.path))
 
-    # ---- path input → re-root or commit ----
+    # ---- path input Enter → re-root or commit ----
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "picker-path":
             return
         candidate = Path(event.value).expanduser()
         if candidate.is_dir():
+            # Treat as navigation: re-root the tree at this directory.
             self._reroot(candidate.resolve())
         elif candidate.parent.is_dir():
-            # File may not exist yet — useful for output paths.
+            # File path under an existing directory — commit even if file doesn't
+            # exist yet (useful for output paths the run is about to create).
             self.dismiss(candidate.resolve())
         else:
             self.notify(f"Path not found: {candidate}", severity="error")
@@ -265,6 +304,8 @@ class FilePickerScreen(ModalScreen[Path | None]):
             self.action_cancel()
         elif event.button.id == "picker-up":
             self.action_go_up()
+        elif event.button.id == "picker-accept":
+            self.action_accept()
 
     # ---- actions ----
 
@@ -277,6 +318,27 @@ class FilePickerScreen(ModalScreen[Path | None]):
         if parent != current:
             self._reroot(parent)
 
+    def action_accept(self) -> None:
+        candidate = Path(self.query_one("#picker-path", Input).value).expanduser()
+        if candidate.is_dir():
+            if not self.allow_directory:
+                self.notify(
+                    "This picker requires a file. The current selection is a folder — "
+                    "highlight a file in the tree, or type a filename in the path field.",
+                    severity="error",
+                )
+                return
+            self.dismiss(candidate.resolve())
+            return
+        # File (existing) or non-existent path under an existing directory.
+        if candidate.exists() or candidate.parent.is_dir():
+            self.dismiss(candidate.resolve() if candidate.exists() else candidate)
+            return
+        self.notify(
+            f"Parent directory does not exist: {candidate.parent}",
+            severity="error",
+        )
+
     # ---- helpers ----
 
     def _current_root(self) -> Path:
@@ -287,7 +349,6 @@ class FilePickerScreen(ModalScreen[Path | None]):
         tree.path = str(new_root)
         path_input = self.query_one("#picker-path", Input)
         path_input.value = str(new_root)
-        # Reload the tree contents so its display matches the new root.
         tree.reload()
         tree.focus()
 
@@ -556,17 +617,48 @@ class RunScreen(_BackableScreen):
             input("\nPress Enter to return to the menu… ")
 
     def _open_picker_for(self, target_input_selector: str) -> None:
-        """Push the FilePicker modal and pipe the selected path into the given Input."""
+        """Push the FilePicker modal and pipe the selected path into the given Input.
+
+        For the output path picker, accepting a folder is allowed: we then
+        compose a default filename (`<image-stem>.<ext>`) inside that folder so
+        the user doesn't have to type it manually.
+        """
         current = self.query_one(target_input_selector, Input).value.strip()
         start = Path(current).expanduser().parent if current else Path.cwd()
         if not start.exists():
             start = Path.cwd()
 
-        def _on_pick(path: Path | None) -> None:
-            if path is not None:
-                self.query_one(target_input_selector, Input).value = str(path)
+        is_output = target_input_selector == "#run-output"
+        title = "Pick the output path or a folder" if is_output else "Pick the input image"
 
-        self.app.push_screen(FilePickerScreen(start_path=start), _on_pick)
+        def _on_pick(path: Path | None) -> None:
+            if path is None:
+                return
+            target = self.query_one(target_input_selector, Input)
+            # Output picker: if the user accepted a folder, append a sensible
+            # default filename so the value is a complete writable path.
+            if is_output and path.is_dir():
+                target.value = str(path / self._default_output_filename())
+            else:
+                target.value = str(path)
+
+        self.app.push_screen(
+            FilePickerScreen(start_path=start, allow_directory=is_output, title=title),
+            _on_pick,
+        )
+
+    def _default_output_filename(self) -> str:
+        """Compose `<image-stem><output_ext>` based on the currently-selected model."""
+        from contextlib import suppress
+
+        model_id = self.query_one("#run-model", Select).value
+        ext = ".out"
+        if isinstance(model_id, str):
+            with suppress(KeyError):
+                ext = get_adapter(model_id, Paths.default()).info.output_extension
+        image_value = self.query_one("#run-image", Input).value.strip()
+        stem = Path(image_value).stem if image_value else "output"
+        return f"{stem}{ext}"
 
 
 # ---------------------------------------------------------------------------

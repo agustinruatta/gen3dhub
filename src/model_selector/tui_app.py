@@ -28,10 +28,11 @@ from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     DataTable,
+    DirectoryTree,
     Footer,
     Header,
     Input,
@@ -126,6 +127,96 @@ class _BackableScreen(Screen):
         Binding("q", "app.pop_screen", "Back"),
         Binding("ctrl+c", "app.quit", "Quit", show=False),
     ]
+
+    async def on_key(self, event):
+        """Make Down/Up navigate the form like Tab/Shift+Tab.
+
+        Inputs and Buttons don't consume Down/Up, so we intercept here and move
+        focus. We deliberately *don't* steal the keys when a Select is focused
+        — the Select needs Down to open its overlay (closed) or to navigate
+        options (open). Use Tab or Enter to leave a Select.
+        """
+        if event.key not in ("down", "up"):
+            return
+        focused = self.focused
+        if focused is None or isinstance(focused, Select):
+            return
+        if event.key == "down":
+            self.focus_next()
+        else:
+            self.focus_previous()
+        event.stop()
+
+
+# ---------------------------------------------------------------------------
+# File picker (modal)
+# ---------------------------------------------------------------------------
+
+
+class FilePickerScreen(ModalScreen[Path | None]):
+    """Modal with a DirectoryTree. Returns the selected file path, or None on cancel."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", "Cancel"),
+    ]
+
+    DEFAULT_CSS = """
+    FilePickerScreen {
+        align: center middle;
+    }
+    FilePickerScreen #picker-box {
+        width: 90;
+        height: 30;
+        border: thick $primary;
+        background: $surface;
+    }
+    FilePickerScreen #picker-header {
+        height: 3;
+        padding: 1 1 0 1;
+    }
+    FilePickerScreen #picker-tree {
+        height: 1fr;
+        padding: 0 1;
+    }
+    FilePickerScreen #picker-footer {
+        height: 3;
+        padding: 1 1 0 1;
+        align: right middle;
+    }
+    """
+
+    def __init__(self, start_path: Path | None = None) -> None:
+        super().__init__()
+        self.start_path = (start_path or Path.cwd()).expanduser().resolve()
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Static(
+                "[b]Pick a file[/b]\n"
+                "[dim]↑/↓ navigate · Enter open folder / select file · Esc cancel[/dim]",
+                id="picker-header",
+            ),
+            DirectoryTree(str(self.start_path), id="picker-tree"),
+            Horizontal(
+                Button("Cancel", id="picker-cancel"),
+                id="picker-footer",
+            ),
+            id="picker-box",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one(DirectoryTree).focus()
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self.dismiss(Path(event.path))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "picker-cancel":
+            self.action_cancel()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +366,16 @@ class RunScreen(_BackableScreen):
     RunScreen Input {
         margin: 0;
     }
+    RunScreen .path-row {
+        height: 3;
+    }
+    RunScreen .path-row Input {
+        width: 1fr;
+    }
+    RunScreen .path-row Button {
+        width: auto;
+        margin-left: 1;
+    }
     RunScreen #run-buttons {
         height: 3;
         padding: 1 0 0 0;
@@ -298,11 +399,19 @@ class RunScreen(_BackableScreen):
                 value=first_id,
             ),
             Label("Image path:"),
-            Input(placeholder="/path/to/input.png", id="run-image"),
+            Horizontal(
+                Input(placeholder="/path/to/input.png", id="run-image"),
+                Button("Browse…", id="run-browse-image"),
+                classes="path-row",
+            ),
             Label("Text prompt (only used by text-input models):"),
             Input(placeholder="(leave blank for image-input models)", id="run-text"),
             Label("Output path (optional — defaults to <stem>.<ext> in CWD):"),
-            Input(placeholder="/path/to/output.glb", id="run-output"),
+            Horizontal(
+                Input(placeholder="/path/to/output.glb", id="run-output"),
+                Button("Browse…", id="run-browse-output"),
+                classes="path-row",
+            ),
             Horizontal(
                 Button("Run", variant="primary", id="run-go"),
                 id="run-buttons",
@@ -312,6 +421,12 @@ class RunScreen(_BackableScreen):
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "run-browse-image":
+            self._open_picker_for("#run-image")
+            return
+        if event.button.id == "run-browse-output":
+            self._open_picker_for("#run-output")
+            return
         if event.button.id != "run-go":
             return
         model_id = self.query_one("#run-model", Select).value
@@ -352,6 +467,19 @@ class RunScreen(_BackableScreen):
             except Exception as exc:
                 error(str(exc))
             input("\nPress Enter to return to the menu… ")
+
+    def _open_picker_for(self, target_input_selector: str) -> None:
+        """Push the FilePicker modal and pipe the selected path into the given Input."""
+        current = self.query_one(target_input_selector, Input).value.strip()
+        start = Path(current).expanduser().parent if current else Path.cwd()
+        if not start.exists():
+            start = Path.cwd()
+
+        def _on_pick(path: Path | None) -> None:
+            if path is not None:
+                self.query_one(target_input_selector, Input).value = str(path)
+
+        self.app.push_screen(FilePickerScreen(start_path=start), _on_pick)
 
 
 # ---------------------------------------------------------------------------

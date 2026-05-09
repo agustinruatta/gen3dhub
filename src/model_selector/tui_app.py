@@ -154,11 +154,19 @@ class _BackableScreen(Screen):
 
 
 class FilePickerScreen(ModalScreen[Path | None]):
-    """Modal with a DirectoryTree. Returns the selected file path, or None on cancel."""
+    """Modal with a DirectoryTree, an editable path input, and an Up button.
+
+    Returns the selected absolute path, or None on cancel.
+
+    The path Input lets the user type any location and press Enter:
+      - if it's a directory → the tree re-roots there
+      - if it's a file (or a path under an existing directory) → the path is
+        committed, even if the file doesn't exist yet (useful for output paths)
+    """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel", "Cancel"),
-        Binding("q", "cancel", "Cancel"),
+        Binding("alt+up", "go_up", "Up dir"),
     ]
 
     DEFAULT_CSS = """
@@ -174,6 +182,17 @@ class FilePickerScreen(ModalScreen[Path | None]):
     FilePickerScreen #picker-header {
         height: 3;
         padding: 1 1 0 1;
+    }
+    FilePickerScreen #picker-path-row {
+        height: 3;
+        padding: 0 1;
+    }
+    FilePickerScreen #picker-path-row Input {
+        width: 1fr;
+    }
+    FilePickerScreen #picker-path-row Button {
+        width: auto;
+        margin-left: 1;
     }
     FilePickerScreen #picker-tree {
         height: 1fr;
@@ -194,8 +213,15 @@ class FilePickerScreen(ModalScreen[Path | None]):
         yield Container(
             Static(
                 "[b]Pick a file[/b]\n"
-                "[dim]↑/↓ navigate · Enter open folder / select file · Esc cancel[/dim]",
+                "[dim]↑/↓ in tree · Enter open folder or select file · "
+                "Type a path + Enter to jump · Up button or Alt+↑ for parent · "
+                "Esc cancel[/dim]",
                 id="picker-header",
+            ),
+            Horizontal(
+                Input(value=str(self.start_path), id="picker-path"),
+                Button("Up", id="picker-up"),
+                id="picker-path-row",
             ),
             DirectoryTree(str(self.start_path), id="picker-tree"),
             Horizontal(
@@ -208,15 +234,57 @@ class FilePickerScreen(ModalScreen[Path | None]):
     def on_mount(self) -> None:
         self.query_one(DirectoryTree).focus()
 
+    # ---- tree → return file ----
+
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         self.dismiss(Path(event.path))
+
+    # ---- path input → re-root or commit ----
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "picker-path":
+            return
+        candidate = Path(event.value).expanduser()
+        if candidate.is_dir():
+            self._reroot(candidate.resolve())
+        elif candidate.parent.is_dir():
+            # File may not exist yet — useful for output paths.
+            self.dismiss(candidate.resolve())
+        else:
+            self.notify(f"Path not found: {candidate}", severity="error")
+
+    # ---- buttons ----
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "picker-cancel":
             self.action_cancel()
+        elif event.button.id == "picker-up":
+            self.action_go_up()
+
+    # ---- actions ----
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_go_up(self) -> None:
+        current = self._current_root()
+        parent = current.parent
+        if parent != current:
+            self._reroot(parent)
+
+    # ---- helpers ----
+
+    def _current_root(self) -> Path:
+        return Path(self.query_one(DirectoryTree).path).resolve()
+
+    def _reroot(self, new_root: Path) -> None:
+        tree = self.query_one(DirectoryTree)
+        tree.path = str(new_root)
+        path_input = self.query_one("#picker-path", Input)
+        path_input.value = str(new_root)
+        # Reload the tree contents so its display matches the new root.
+        tree.reload()
+        tree.focus()
 
 
 # ---------------------------------------------------------------------------

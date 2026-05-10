@@ -49,9 +49,15 @@ _HF_VARIANT = "fp16"
 _LICENSE_URL = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/LICENSE"
 
 # Hunyuan3D-2's requirements.txt deliberately omits torch/torchvision (the
-# upstream README says "install Pytorch via the official site first"). Pin the
-# same versions as SF3D for consistency — both work on CUDA 12.1 wheels.
-_TORCH_PACKAGES: tuple[str, ...] = ("torch==2.4.1", "torchvision==0.19.1")
+# upstream README says "install Pytorch via the official site first").
+#
+# We pin newer torch than SF3D (2.4.1) intentionally: Hunyuan3D-2's setup.py
+# requires `transformers>=4.48.0`, and modern transformers (4.50+) uses
+# `torch.library.custom_op` with string-form type annotations in its MoE
+# integration. Resolving those forward references inside infer_schema landed
+# in torch 2.5; 2.4.x raises "Parameter input has unsupported type torch.Tensor"
+# at import time. Each model has its own venv, so this isn't a conflict.
+_TORCH_PACKAGES: tuple[str, ...] = ("torch==2.5.1", "torchvision==0.20.1")
 
 
 # Runner script written into the model dir during setup. Imports hy3dgen

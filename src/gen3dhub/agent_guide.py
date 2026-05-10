@@ -54,6 +54,16 @@ THREE-STEP WORKFLOW (idempotent)
        gen3dhub run --model <id> --image <path> --output <path> --yes
      On success prints `Wrote 3D mesh -> <path>` and exits 0.
 
+     Pass `--cpu` to force CPU inference. Useful when:
+       - the host has no NVIDIA GPU,
+       - the GPU runs out of VRAM (CUDA OutOfMemoryError),
+       - or running in CI / headless servers.
+     ~10-60x slower than GPU but always works.
+
+     gen3dhub auto-sets PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True in
+     the inference subprocess to reduce CUDA fragmentation on near-the-edge
+     8 GB GPUs. Override by setting the env var explicitly before invoking.
+
 DISCOVERY
   gen3dhub list                  show supported models, inputs, output ext
   gen3dhub <subcommand> --help   per-subcommand flags

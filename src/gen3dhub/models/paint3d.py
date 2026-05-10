@@ -43,6 +43,8 @@ from gen3dhub.models.base import (
     InputSpec,
     ModelAdapter,
     ModelInfo,
+    ParamKind,
+    ParamSpec,
     RunRequest,
 )
 from gen3dhub.utils.process import run_streaming
@@ -91,7 +93,12 @@ _RUNNER_SOURCE = """\
 '''gen3dhub runner for Paint3D. Runs both stages then converts to GLB.
 
 Usage: python runner.py <mesh_path> <reference_image_path> <output_glb>
+
+Tunables (read from environment so the adapter can pass them per-run):
+  PAINT3D_PROMPT   text prompt to combine with the reference image
+                   (empty -> upstream's whitespace fallback for IP-Adapter only)
 '''
+import os
 import sys
 import subprocess
 from pathlib import Path
@@ -114,6 +121,10 @@ def main() -> None:
     stage1_dir = work_dir / "stage1"
     stage2_dir = work_dir / "stage2"
 
+    # Empty prompt isn't allowed by upstream's argparse. Pass " " when the
+    # user supplied nothing — IP-Adapter handles image-only conditioning fine.
+    prompt = os.environ.get("PAINT3D_PROMPT", "").strip() or " "
+
     print("=== Paint3D stage 1: coarse texture (depth-conditioned multi-view) ===", flush=True)
     subprocess.run(
         [
@@ -121,7 +132,7 @@ def main() -> None:
             "--sd_config", "controlnet/config/depth_based_inpaint_template.yaml",
             "--render_config", "paint3d/config/train_config_paint3d.py",
             "--mesh_path", str(mesh_path),
-            "--prompt", " ",
+            "--prompt", prompt,
             "--ip_adapter_image_path", str(image_path),
             "--outdir", str(stage1_dir),
         ],
@@ -142,7 +153,7 @@ def main() -> None:
             "--render_config", "paint3d/config/train_config_paint3d.py",
             "--mesh_path", str(mesh_path),
             "--texture_path", str(stage1_albedo),
-            "--prompt", " ",
+            "--prompt", prompt,
             "--ip_adapter_image_path", str(image_path),
             "--outdir", str(stage2_dir),
         ],
@@ -226,6 +237,18 @@ class Paint3DAdapter(ModelAdapter):
             ),
         ),
         output_extension=".glb",
+        params=(
+            ParamSpec(
+                name="prompt",
+                label="Text prompt",
+                description=(
+                    "Optional text guidance combined with the reference image. "
+                    "Empty by default; the IP-Adapter handles image-only conditioning."
+                ),
+                kind=ParamKind.TEXT,
+                default="",
+            ),
+        ),
     )
 
     # ---------- setup ----------
@@ -404,6 +427,11 @@ class Paint3DAdapter(ModelAdapter):
                 "Paint3D does not support CPU mode (upstream pipelines hard-code "
                 ".to('cuda')). Ignoring --cpu and attempting GPU inference."
             )
+
+        # Forward user-supplied params to the runner via env vars.
+        prompt_value = request.params.get("prompt")
+        if isinstance(prompt_value, str) and prompt_value.strip():
+            env["PAINT3D_PROMPT"] = prompt_value
 
         with tempfile.TemporaryDirectory(prefix="paint3d-") as _:
             info(f"Running Paint3D on {mesh_path.name} with reference {image_path.name}")

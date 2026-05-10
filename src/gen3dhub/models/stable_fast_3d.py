@@ -20,6 +20,8 @@ from gen3dhub.models.base import (
     InputSpec,
     ModelAdapter,
     ModelInfo,
+    ParamKind,
+    ParamSpec,
     RunRequest,
 )
 from gen3dhub.utils.process import run_streaming
@@ -76,6 +78,34 @@ class StableFast3DAdapter(ModelAdapter):
             ),
         ),
         output_extension=".glb",
+        params=(
+            ParamSpec(
+                name="texture_resolution",
+                label="Texture resolution",
+                description="UV texture map size in pixels. Higher = sharper, more VRAM.",
+                kind=ParamKind.SELECT,
+                default="1024",
+                choices=("512", "1024", "2048"),
+            ),
+            ParamSpec(
+                name="remesh_option",
+                label="Remesh topology",
+                description=(
+                    "Remeshing pass. 'quad' is the standard target for game pipelines; "
+                    "'none' keeps the raw output."
+                ),
+                kind=ParamKind.SELECT,
+                default="none",
+                choices=("none", "triangle", "quad"),
+            ),
+            ParamSpec(
+                name="target_vertex_count",
+                label="Target vertex count",
+                description="-1 keeps the raw count. Set a positive number to decimate (LODs).",
+                kind=ParamKind.INT,
+                default=-1,
+            ),
+        ),
     )
 
     # ---------- setup ----------
@@ -347,6 +377,21 @@ class StableFast3DAdapter(ModelAdapter):
             env["SF3D_USE_CPU"] = "1"
             info("Forcing CPU inference for SF3D's main model (rembg keeps GPU).")
 
+        # Translate user-supplied params (or their defaults) into upstream's
+        # run.py CLI flags. Anything not provided is left to upstream's
+        # built-in defaults — we only forward what the user asked for or what
+        # we've explicitly chosen to override.
+        cli_params: list[str] = []
+        texture_res = request.params.get("texture_resolution")
+        if texture_res is not None:
+            cli_params.extend(["--texture-resolution", str(texture_res)])
+        remesh = request.params.get("remesh_option")
+        if remesh and remesh != "none":
+            cli_params.extend(["--remesh_option", str(remesh)])
+        target_verts = request.params.get("target_vertex_count")
+        if isinstance(target_verts, int) and target_verts > 0:
+            cli_params.extend(["--target-vertex-count", str(target_verts)])
+
         with tempfile.TemporaryDirectory(prefix="sf3d-") as staging:
             staging_dir = Path(staging)
             info(f"Running inference on {image_path.name}")
@@ -356,6 +401,7 @@ class StableFast3DAdapter(ModelAdapter):
                         str(venv_python), "run.py",
                         str(image_path),
                         "--output-dir", str(staging_dir),
+                        *cli_params,
                     ],
                     cwd=repo_dir,
                     env=env,

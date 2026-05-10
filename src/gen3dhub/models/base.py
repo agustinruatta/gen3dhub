@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from gen3dhub.config import Paths
 
@@ -16,6 +17,34 @@ class InputKind(StrEnum):
     IMAGE = "image"
     TEXT = "text"
     MESH = "mesh"  # path to an existing 3D mesh (.obj, .glb, .ply, ...)
+
+
+class ParamKind(StrEnum):
+    """How a tunable parameter is rendered in the UI and parsed from the CLI."""
+
+    INT = "int"        # integer; rendered as an Input with numeric validation
+    FLOAT = "float"    # float; rendered as an Input with numeric validation
+    BOOL = "bool"      # rendered as a Checkbox
+    SELECT = "select"  # rendered as a Select; requires `choices`
+    TEXT = "text"      # free-form string; rendered as an Input
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """A tunable parameter exposed by an adapter.
+
+    Adapters declare these so the CLI's `--param NAME=VALUE` flag and the TUI's
+    Parameters section know what's available, what the default is, and how to
+    render/validate user input. The adapter then reads the resolved values
+    from `RunRequest.params` at inference time.
+    """
+
+    name: str          # parameter id used in --param NAME=VALUE
+    label: str         # human-readable label for the TUI
+    description: str   # one-sentence help text
+    kind: ParamKind
+    default: Any       # default value (matches `kind`)
+    choices: tuple[str, ...] | None = None  # required for ParamKind.SELECT
 
 
 @dataclass(frozen=True)
@@ -67,14 +96,27 @@ class ModelInfo:
     requires_hf_auth: bool
     inputs: tuple[InputSpec, ...]
     output_extension: str  # e.g. ".glb"
+    params: tuple[ParamSpec, ...] = ()  # tunable per-model parameters
 
 
 @dataclass
 class RunRequest:
-    """Resolved inputs and options handed to an adapter at inference time."""
+    """Resolved inputs and options handed to an adapter at inference time.
+
+    `inputs` carries paths/strings for the InputSpec slots the model declares.
+    `params` carries tunable values matching the adapter's ParamSpecs, after
+    type coercion (ints are ints, etc.) — adapters apply them or fall back to
+    the spec's default.
+    `extra` is reserved for orchestration flags (currently `force_cpu`); it's
+    intentionally separate from `params` so model-tuning values don't collide
+    with framework switches.
+    `output_path` is the explicit destination, if the user supplied one;
+    adapters compute their own default when it's None.
+    """
 
     inputs: dict[str, str | Path] = field(default_factory=dict)
     output_path: Path | None = None
+    params: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, str] = field(default_factory=dict)
 
 

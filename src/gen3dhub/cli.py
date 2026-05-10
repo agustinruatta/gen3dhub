@@ -24,7 +24,7 @@ from rich.panel import Panel
 from gen3dhub import __version__, tui
 from gen3dhub.config import Paths
 from gen3dhub.console import console, error, info, success
-from gen3dhub.models.base import ModelInfo, RunRequest
+from gen3dhub.models.base import ModelInfo, ParamKind, ParamSpec, RunRequest
 from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
 app = typer.Typer(
@@ -90,12 +90,34 @@ def list_command() -> None:
         )
         if fit.detail:
             fit_block += f"\n  [dim]{fit.detail}[/dim]"
+
+        if m.params:
+            param_lines = []
+            for p in m.params:
+                if p.kind is ParamKind.SELECT and p.choices:
+                    type_hint = " | ".join(p.choices)
+                else:
+                    type_hint = p.kind.value
+                param_lines.append(
+                    f"  • [bold]{p.name}[/bold] = {p.default!r}  "
+                    f"[muted]({type_hint})[/muted]"
+                )
+            params_block = (
+                "[bold magenta]⚙ Parameters[/bold magenta] "
+                "[muted](pass via `--param NAME=VALUE` or set in the TUI)[/muted]\n"
+                + "\n".join(param_lines)
+                + "\n\n"
+            )
+        else:
+            params_block = ""
+
         body = (
             f"{m.description}\n\n"
             f"[bold cyan]→ Best for[/bold cyan]\n  {m.best_for}\n\n"
             f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
             f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
             f"{fit_block}\n\n"
+            f"{params_block}"
             f"[muted]Inputs:[/muted] {inputs}    "
             f"[muted]Output:[/muted] {m.output_extension}"
         )
@@ -244,6 +266,17 @@ def run_command(
             ),
         ),
     ] = False,
+    param: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--param", "-p",
+            help=(
+                "Set a model-specific parameter as KEY=VALUE (repeat for multiple). "
+                "Run `gen3dhub list` to see each model's parameters. "
+                "Example: --param texture_resolution=2048 --param remesh_option=quad"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
     import sys
@@ -274,10 +307,12 @@ def run_command(
 
     inputs = _resolve_inputs(model_info, image=image, text=text, mesh=mesh)
     output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)
+    params = _parse_params(model_info, param or [])
 
     request = RunRequest(
         inputs=dict(inputs),
         output_path=output_path,
+        params=params,
         extra={"force_cpu": "1"} if cpu else {},
     )
     info(f"Running [model]{model_id}[/model]…")
@@ -348,6 +383,86 @@ def _resolve_output(
     if yes:
         return default
     return tui.ask_output_path(default)
+
+
+def _parse_params(model_info: ModelInfo, raw: list[str]) -> dict[str, object]:
+    """Validate and coerce `--param KEY=VALUE` pairs against the model's spec.
+
+    Unknown keys, missing `=`, and out-of-range values raise typer.BadParameter
+    with a message that lists the model's allowed parameters — so the user
+    learns the surface from the error rather than from a separate `--help`.
+    """
+    if not raw:
+        return {}
+    declared: dict[str, ParamSpec] = {p.name: p for p in model_info.params}
+
+    if not declared:
+        # Caller passed --param but this model declares none. Fail loudly so the
+        # user notices instead of silently ignoring.
+        offending = ", ".join(entry.split("=", 1)[0] for entry in raw)
+        raise typer.BadParameter(
+            f"Model '{model_info.id}' takes no tunable parameters; got: {offending}"
+        )
+
+    result: dict[str, object] = {}
+    for entry in raw:
+        if "=" not in entry:
+            raise typer.BadParameter(
+                f"--param expects KEY=VALUE, got {entry!r}. "
+                f"Available for '{model_info.id}': {_format_param_help(model_info)}"
+            )
+        key, _, value = entry.partition("=")
+        key = key.strip()
+        value = value.strip()
+        spec = declared.get(key)
+        if spec is None:
+            raise typer.BadParameter(
+                f"Unknown parameter {key!r} for model '{model_info.id}'.\n"
+                f"Available: {_format_param_help(model_info)}"
+            )
+        try:
+            result[key] = _coerce_param(value, spec)
+        except ValueError as exc:
+            raise typer.BadParameter(f"--param {key}: {exc}") from None
+    return result
+
+
+def _coerce_param(raw: str, spec: ParamSpec) -> object:
+    if spec.kind is ParamKind.INT:
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(f"expected an integer, got {raw!r}") from exc
+    if spec.kind is ParamKind.FLOAT:
+        try:
+            return float(raw)
+        except ValueError as exc:
+            raise ValueError(f"expected a number, got {raw!r}") from exc
+    if spec.kind is ParamKind.BOOL:
+        normalized = raw.strip().lower()
+        if normalized in ("true", "1", "yes", "y", "on"):
+            return True
+        if normalized in ("false", "0", "no", "n", "off"):
+            return False
+        raise ValueError(f"expected a boolean (true/false), got {raw!r}")
+    if spec.kind is ParamKind.SELECT:
+        if spec.choices and raw not in spec.choices:
+            raise ValueError(
+                f"value {raw!r} is not one of {', '.join(spec.choices)}"
+            )
+        return raw
+    return raw  # ParamKind.TEXT
+
+
+def _format_param_help(model_info: ModelInfo) -> str:
+    """Compact "name(kind, default=…)" listing used in --param error messages."""
+    bits = []
+    for p in model_info.params:
+        if p.kind is ParamKind.SELECT and p.choices:
+            bits.append(f"{p.name}={'|'.join(p.choices)}")
+        else:
+            bits.append(f"{p.name}=<{p.kind.value}>")
+    return ", ".join(bits) if bits else "(none)"
 
 
 def _launch_tui() -> None:

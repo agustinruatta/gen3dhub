@@ -47,7 +47,7 @@ from textual.widgets import (
 from gen3dhub import __version__
 from gen3dhub.config import Paths
 from gen3dhub.console import error
-from gen3dhub.models.base import InputKind, RunRequest
+from gen3dhub.models.base import InputKind, ParamKind, RunRequest
 from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
 _ALL_TARGETS = "__all__"
@@ -613,6 +613,11 @@ class RunScreen(_BackableScreen):
                 Button("Browse…", id="run-browse-output"),
                 classes="path-row",
             ),
+            Static(
+                "[b]Parameters[/b] [muted](model-specific)[/muted]",
+                id="run-params-label",
+            ),
+            Container(id="run-params"),
             Checkbox(
                 "Install model automatically if not installed yet",
                 value=True,
@@ -631,19 +636,61 @@ class RunScreen(_BackableScreen):
         )
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         # Hide the input rows that don't apply to the model chosen by default.
         initial = self.query_one("#run-model", Select).value
         if isinstance(initial, str):
             self._refresh_input_visibility(initial)
+            await self._refresh_params(initial)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
+    async def on_select_changed(self, event: Select.Changed) -> None:
         # Only react to the model picker — Selects on other screens reuse the
         # same event type but we don't care about them here.
         if event.select.id != "run-model":
             return
         if isinstance(event.value, str):
             self._refresh_input_visibility(event.value)
+            await self._refresh_params(event.value)
+
+    async def _refresh_params(self, model_id: str) -> None:
+        """Mount one widget per declared ParamSpec for the chosen model.
+
+        Widgets get IDs prefixed with `param-<name>` so submit can collect
+        them generically. Container is cleared on every model change so we
+        don't accumulate stale widgets.
+        """
+        try:
+            adapter = get_adapter(model_id, Paths.default())
+        except KeyError:
+            return
+        container = self.query_one("#run-params", Container)
+        await container.remove_children()
+
+        params = adapter.info.params
+        # Hide the label too when the model has no params at all.
+        self.query_one("#run-params-label").display = bool(params)
+        container.display = bool(params)
+        if not params:
+            return
+
+        for spec in params:
+            await container.mount(Label(f"{spec.label}: [dim]{spec.description}[/dim]"))
+            await container.mount(self._make_param_widget(spec))
+
+    def _make_param_widget(self, spec):
+        """Build the right widget kind for a ParamSpec; default value pre-filled."""
+        widget_id = f"param-{spec.name}"
+        if spec.kind is ParamKind.SELECT:
+            return Select(
+                [(c, c) for c in (spec.choices or ())],
+                id=widget_id,
+                allow_blank=False,
+                value=str(spec.default),
+            )
+        if spec.kind is ParamKind.BOOL:
+            return Checkbox("", value=bool(spec.default), id=widget_id)
+        # int / float / text all render as a plain Input; coercion happens at submit.
+        return Input(value=str(spec.default), id=widget_id, classes="param-input")
 
     def _refresh_input_visibility(self, model_id: str) -> None:
         """Show/hide image/mesh/text rows based on the selected model's InputSpec.
@@ -711,12 +758,53 @@ class RunScreen(_BackableScreen):
         auto_setup = self.query_one("#run-auto-setup", Checkbox).value
         force_cpu = self.query_one("#run-force-cpu", Checkbox).value
 
+        try:
+            params = self._collect_params(adapter.info)
+        except ValueError as exc:
+            self.notify(str(exc), severity="error")
+            return
+
         request = RunRequest(
             inputs=inputs,
             output_path=Path(output).expanduser() if output else None,
+            params=params,
             extra={"force_cpu": "1"} if force_cpu else {},
         )
         self._run_inference(adapter, request, auto_setup=auto_setup)
+
+    def _collect_params(self, model_info) -> dict[str, object]:
+        """Read each param widget by its `param-<name>` id and coerce to the spec's type."""
+        result: dict[str, object] = {}
+        for spec in model_info.params:
+            widget_id = f"#param-{spec.name}"
+            if spec.kind is ParamKind.BOOL:
+                result[spec.name] = self.query_one(widget_id, Checkbox).value
+                continue
+            if spec.kind is ParamKind.SELECT:
+                value = self.query_one(widget_id, Select).value
+                result[spec.name] = str(value) if isinstance(value, str) else spec.default
+                continue
+            raw = self.query_one(widget_id, Input).value.strip()
+            if not raw:
+                result[spec.name] = spec.default
+                continue
+            if spec.kind is ParamKind.INT:
+                try:
+                    result[spec.name] = int(raw)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Parameter '{spec.label}' must be an integer (got {raw!r})."
+                    ) from exc
+            elif spec.kind is ParamKind.FLOAT:
+                try:
+                    result[spec.name] = float(raw)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Parameter '{spec.label}' must be a number (got {raw!r})."
+                    ) from exc
+            else:  # TEXT
+                result[spec.name] = raw
+        return result
 
     def _run_inference(self, adapter, request: RunRequest, *, auto_setup: bool) -> None:
         with self.app.suspend():

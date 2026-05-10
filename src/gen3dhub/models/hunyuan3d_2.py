@@ -33,6 +33,8 @@ from gen3dhub.models.base import (
     InputSpec,
     ModelAdapter,
     ModelInfo,
+    ParamKind,
+    ParamSpec,
     RunRequest,
 )
 from gen3dhub.utils.process import run_streaming
@@ -70,8 +72,13 @@ _RUNNER_SOURCE = """\
 '''gen3dhub runner for Hunyuan3D-2 (shape-only, mini variant).
 
 Usage: python runner.py <image_path> <output_path>
-Reads device from HUNYUAN3D_DEVICE env (default "cuda"; set to "cpu" to force).
-Reads seed   from HUNYUAN3D_SEED   env (default 12345).
+
+Tunables (read from environment so the adapter can pass them per-run):
+  HUNYUAN3D_DEVICE         "cuda" (default) or "cpu"
+  HUNYUAN3D_SEED           int (default 12345)
+  HUNYUAN3D_NUM_STEPS      int (default 30); inference iterations
+  HUNYUAN3D_OCTREE_RES     int (default 380); mesh-resolution knob
+  HUNYUAN3D_NUM_CHUNKS     int (default 20000); chunk count for the pipeline
 '''
 import os
 import sys
@@ -90,6 +97,9 @@ def main() -> None:
 
     device = os.environ.get("HUNYUAN3D_DEVICE", "cuda")
     seed = int(os.environ.get("HUNYUAN3D_SEED", "12345"))
+    num_steps = int(os.environ.get("HUNYUAN3D_NUM_STEPS", "30"))
+    octree_res = int(os.environ.get("HUNYUAN3D_OCTREE_RES", "380"))
+    num_chunks = int(os.environ.get("HUNYUAN3D_NUM_CHUNKS", "20000"))
 
     img = Image.open(image_path)
     # If the user provided an alpha-having image (cutout), trust it. Otherwise
@@ -109,12 +119,16 @@ def main() -> None:
         device=device,
     )
 
-    print("Running shape generation…", flush=True)
+    print(
+        f"Running shape generation (steps={num_steps}, octree={octree_res}, "
+        f"chunks={num_chunks}, seed={seed})…",
+        flush=True,
+    )
     mesh = pipe(
         image=image,
-        num_inference_steps=30,
-        octree_resolution=380,
-        num_chunks=20000,
+        num_inference_steps=num_steps,
+        octree_resolution=octree_res,
+        num_chunks=num_chunks,
         generator=torch.manual_seed(seed),
         output_type="trimesh",
     )[0]
@@ -171,6 +185,33 @@ class Hunyuan3D2Adapter(ModelAdapter):
             ),
         ),
         output_extension=".glb",
+        params=(
+            ParamSpec(
+                name="num_inference_steps",
+                label="Inference steps",
+                description="Denoising iterations. More = better quality, more time.",
+                kind=ParamKind.INT,
+                default=30,
+            ),
+            ParamSpec(
+                name="octree_resolution",
+                label="Octree resolution",
+                description="Mesh detail. Higher = more vertices and more VRAM at peak.",
+                kind=ParamKind.SELECT,
+                default="380",
+                choices=("256", "380", "512"),
+            ),
+            ParamSpec(
+                name="seed",
+                label="Random seed",
+                description=(
+                    "Same seed + same input = same output. Useful for iterating on "
+                    "prompts without random variation."
+                ),
+                kind=ParamKind.INT,
+                default=12345,
+            ),
+        ),
     )
 
     # ---------- setup ----------
@@ -379,6 +420,16 @@ class Hunyuan3D2Adapter(ModelAdapter):
                 "SF3D's CPU mode (expect 10+ minutes); use only if VRAM is "
                 "the bottleneck."
             )
+
+        # Forward user-tunable params to the runner via env vars. Anything not
+        # provided falls back to the runner's own defaults (which match the
+        # ParamSpec defaults in `info`).
+        if "num_inference_steps" in request.params:
+            env["HUNYUAN3D_NUM_STEPS"] = str(request.params["num_inference_steps"])
+        if "octree_resolution" in request.params:
+            env["HUNYUAN3D_OCTREE_RES"] = str(request.params["octree_resolution"])
+        if "seed" in request.params:
+            env["HUNYUAN3D_SEED"] = str(request.params["seed"])
 
         with tempfile.TemporaryDirectory(prefix="hunyuan3d-") as staging:
             staging_dir = Path(staging)

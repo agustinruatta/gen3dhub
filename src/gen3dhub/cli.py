@@ -371,9 +371,30 @@ def run_command(
             ),
         ),
     ] = True,
+    json_: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Stream NDJSON events to stdout (start, *_start/_complete/_failed, "
+                "validate_complete, done). Implies --yes; subprocess output is "
+                "redirected to stderr so stdout stays a clean event stream."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
     import sys
+    import time
+
+    from gen3dhub import events
+    from gen3dhub import history as hist
+
+    if json_:
+        # Pure NDJSON on stdout. Imply --yes so we never block on a prompt
+        # that the agent can't answer.
+        events.set_json_mode(True)
+        yes = True
 
     paths = Paths.default()
     paths.ensure()
@@ -386,19 +407,6 @@ def run_command(
     adapter = get_adapter(model_id, paths)
     model_info = adapter.info
 
-    if not adapter.is_installed:
-        if auto_setup and (yes or tui.confirm(f"'{model_id}' is not installed. Install now?")):
-            adapter.setup()
-            adapter.post_setup(interactive=interactive)
-        else:
-            error(f"Model '{model_id}' is not installed. Run: gen3dhub setup -m {model_id}")
-            raise typer.Exit(code=1)
-    else:
-        # Re-evaluate credentials on every run — cheap and recovers from cases
-        # where the user installed earlier but skipped post-setup. Silent if
-        # already configured.
-        adapter.post_setup(interactive=interactive)
-
     inputs = _resolve_inputs(model_info, image=image, text=text, mesh=mesh)
     output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)
     params = _parse_params(model_info, param or [])
@@ -410,24 +418,57 @@ def run_command(
         extra={"force_cpu": "1"} if cpu else {},
     )
 
-    import time
-
-    from gen3dhub import history as hist
+    events.emit(
+        "start",
+        model=model_id,
+        inputs={k: str(v) for k, v in inputs.items()},
+        params={k: str(v) for k, v in params.items()},
+        output=str(output_path) if output_path else None,
+    )
 
     info(f"Running [model]{model_id}[/model]…")
     start = time.monotonic()
     produced: Path | None = None
     preview_path: Path | None = None
     exit_code = 0
+
     try:
-        produced = adapter.run(request)
+        if not adapter.is_installed:
+            if auto_setup and (
+                yes or tui.confirm(f"'{model_id}' is not installed. Install now?")
+            ):
+                with events.phase("setup", model=model_id):
+                    adapter.setup()
+                with events.phase("post_setup", model=model_id):
+                    adapter.post_setup(interactive=interactive)
+            else:
+                error(
+                    f"Model '{model_id}' is not installed. "
+                    f"Run: gen3dhub setup -m {model_id}"
+                )
+                raise typer.Exit(code=1)
+        else:
+            with events.phase("post_setup", model=model_id):
+                adapter.post_setup(interactive=interactive)
+
+        with events.phase("inference", model=model_id):
+            produced = adapter.run(request)
+
         if preview and produced is not None:
-            preview_path = _try_render_preview(produced)
+            with events.phase("preview", output=str(produced)):
+                preview_path = _try_render_preview(produced)
+
+        if produced is not None:
+            _validate_and_report(produced)
+    except typer.Exit as exc:
+        exit_code = exc.exit_code if isinstance(exc.exit_code, int) else 1
+        raise
     except Exception:
         exit_code = 1
         raise
     finally:
         duration = time.monotonic() - start
+        events.emit("done", exit_code=exit_code, output=str(produced) if produced else None)
         hist.append(
             paths,
             hist.HistoryEntry(
@@ -459,6 +500,74 @@ def _try_render_preview(glb_path: Path) -> Path | None:
         return None
     info(f"Preview: {preview_path}")
     return preview_path
+
+
+def _validate_and_report(glb_path: Path) -> dict | None:
+    """Run mesh validation, emit a `validate_complete` event in JSON mode, and
+    print a human-readable summary otherwise. Best-effort: failures don't
+    propagate — validation is a quality signal, not a precondition.
+    """
+    from gen3dhub import events
+
+    try:
+        from gen3dhub.utils.validation import format_report_human, validate_mesh
+
+        report = validate_mesh(glb_path)
+    except Exception as exc:
+        warn(f"Validation skipped: {exc}")
+        return None
+
+    report_dict = report.as_dict()
+    events.emit("validate_complete", **report_dict)
+    if not events.is_json_mode():
+        console.print()
+        console.print(format_report_human(report))
+    return report_dict
+
+
+# ---------------------------------------------------------------------------
+# validate (standalone)
+# ---------------------------------------------------------------------------
+
+
+@app.command("validate")
+def validate_command(
+    path: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to a 3D mesh file (.glb / .obj / .ply / .off / .stl)."
+        ),
+    ],
+    json_: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit a single JSON object (one line) instead of a human report.",
+        ),
+    ] = False,
+) -> None:
+    """Inspect any mesh file: vertex/triangle counts, materials, manifoldness, etc.
+
+    Useful as a sanity check on outputs from `gen3dhub run`, but works on any
+    mesh — third-party assets, hand-sculpted exports, etc. Same metrics that
+    `run` auto-reports after a successful inference.
+    """
+    import json as _json
+
+    from gen3dhub.utils.validation import format_report_human, validate_mesh
+
+    try:
+        report = validate_mesh(path)
+    except Exception as exc:
+        error(str(exc))
+        raise typer.Exit(code=1) from None
+
+    if json_:
+        # Single line so this composes with `jq` and shell loops.
+        print(_json.dumps(report.as_dict(), default=str))
+        return
+
+    console.print(format_report_human(report))
 
 
 # ---------------------------------------------------------------------------

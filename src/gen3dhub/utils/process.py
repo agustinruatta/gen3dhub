@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -30,15 +31,26 @@ def run_streaming(
     The output is intentionally not captured — for long-running tasks (cloning, pip install,
     inference) the user wants to see progress live.
     """
-    if description:
-        console.print(f"[muted]$ {description}[/muted]")
-    console.print(f"[muted]  → {' '.join(command)}[/muted]")
+    # In --json mode the CLI promises stdout is a pure NDJSON event stream,
+    # so subprocess stdout has to go to stderr — otherwise pip / model loading
+    # logs would interleave with our events and break agent parsers. Outside
+    # JSON mode, inherit the parent's streams so the user sees live progress.
+    from gen3dhub import events
+
+    if events.is_json_mode():
+        stdout_target = sys.stderr
+    else:
+        if description:
+            console.print(f"[muted]$ {description}[/muted]")
+        console.print(f"[muted]  → {' '.join(command)}[/muted]")
+        stdout_target = None  # inherit from parent
 
     completed = subprocess.run(
         list(command),
         cwd=cwd,
         env=dict(env) if env is not None else None,
         check=False,
+        stdout=stdout_target,
     )
     if completed.returncode != 0:
         err_console.print(f"[error]✗ command failed with exit {completed.returncode}[/error]")

@@ -112,7 +112,33 @@ DISCOVERY
   gen3dhub list                  show supported models, inputs, output ext
   gen3dhub <subcommand> --help   per-subcommand flags
   gen3dhub history --json        machine-readable log of past runs
+  gen3dhub validate <glb> --json metrics for a single mesh (vertex count,
+                                 materials, manifoldness, warnings)
   gen3dhub agent                 this guide
+
+STREAMING JSON DURING `run`
+  Pass `--json` to gen3dhub run. Stdout becomes a pure NDJSON event stream
+  (one JSON object per line); subprocess output (pip, model loading, upstream
+  inference logs) is redirected to stderr so it doesn't pollute stdout.
+
+  Event vocabulary:
+    start                 model, inputs, params, output (initial event)
+    setup_start/_complete/_failed         when auto-setup runs
+    post_setup_start/_complete/_failed    credentials check
+    inference_start/_complete/_failed     the actual model call
+    preview_start/_complete/_failed       4-angle thumbnail (best-effort)
+    validate_complete                     full MeshReport fields inlined
+    done                  exit_code (0 success, 1 failure); always last
+
+  Every event carries `ts` (ISO-8601 UTC) plus event-specific fields.
+  *_complete and *_failed include `duration_s`. *_failed includes `error`
+  and `error_type`.
+
+  `--json` implies `--yes` (no prompts, ever). An agent can `tail -f` the
+  stream or pipe it into `jq` directly:
+
+    gen3dhub run -m stable-fast-3d -i in.png -o out.glb --json | \\
+      jq -c 'select(.event == "validate_complete") | {tris: .triangle_count, manifold: .is_watertight}'
 
 HISTORY
   Every successful or failed `gen3dhub run` appends an entry to

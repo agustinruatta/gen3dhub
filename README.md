@@ -176,12 +176,17 @@ agents) or omitted to trigger questionary prompts as a fallback:
 |-------------|---------------------------------------------------------|
 | `list`      | Show available models with strengths, weaknesses, fit   |
 | `setup`     | Install a model (clone, venv, deps); prompt credentials |
-| `run`       | Run inference (auto-renders a 4-angle PNG preview)      |
+| `run`       | Run inference (auto preview + validation report)        |
+| `validate`  | Inspect a mesh: verts, materials, manifoldness          |
 | `uninstall` | Remove a model's repo + venv to reclaim disk space      |
 | `doctor`    | Diagnose host + per-model installation health           |
 | `history`   | Show recent runs / re-run command for a past entry      |
 | `tui`       | Launch the persistent TUI (same as bare invocation)     |
 | `agent`     | Print the full agent/scripting guide as plain text      |
+
+For agents: pass `--json` to `gen3dhub run` to get a streaming NDJSON
+event log on stdout (subprocess output redirected to stderr). See
+`gen3dhub agent` for the event vocabulary.
 
 ### `list` — show available models
 

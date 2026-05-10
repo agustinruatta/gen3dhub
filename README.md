@@ -430,6 +430,37 @@ extensions through raw `setup.py` scripts.
 - `CUDA_VISIBLE_DEVICES` — standard PyTorch GPU selection. Set to `""` to
   hide all GPUs (some models will then fail; prefer `--cpu` instead).
 
+## Development
+
+Run the test suite:
+
+```bash
+uv run pytest -v
+```
+
+Lint:
+
+```bash
+uv run ruff check src/ tests/
+```
+
+CI runs both on every push and PR (Python 3.11 and 3.12) — see
+`.github/workflows/ci.yml`. The committed `uv.lock` makes the CI install
+match local dev byte-for-byte.
+
+The test suite covers:
+
+- pure utilities (events, history, validation, conversion, system fit
+  verdicts, CLI param parsing)
+- CLI smoke (`gen3dhub list / describe / validate / history` via
+  `typer.testing.CliRunner`)
+- TUI flows (every screen mounts, Esc/back-button returns to menu, run-
+  screen input visibility and param widgets re-render with model selection)
+
+Tests don't touch the network, GPU, or per-model venvs — they're fast and
+hermetic. Anything that needs an actual adapter run is covered by the
+existing manual `gen3dhub run …` flow.
+
 ## License
 
 MIT.

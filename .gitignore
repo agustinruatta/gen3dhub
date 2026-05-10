@@ -14,8 +14,7 @@ dist/
 venv/
 env/
 
-# uv
-uv.lock
+# uv: keep uv.lock committed for reproducible installs across machines / CI.
 
 # IDE
 .vscode/

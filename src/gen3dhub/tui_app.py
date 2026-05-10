@@ -1035,32 +1035,42 @@ class UninstallScreen(_BackableScreen):
             choices.append((f"{m.display_name}  ({size})  —  {m.id}", m.id))
 
         yield Header(show_clock=False)
-        yield Container(
-            self._back_toolbar(),
-            Static(
-                "[b]Uninstall a model[/b]\n"
-                "[dim]Removes the per-model repo + venv. Hugging Face weights "
-                "in ~/.cache/huggingface/ are kept (shared across HF tools).[/dim]"
-            ),
-            Label("Model to uninstall:"),
-            Select(
-                choices,
-                id="uninstall-model",
-                allow_blank=False,
-                prompt="(no models installed)" if not choices else "Pick one",
-                value=choices[0][1] if choices else Select.BLANK,
-            ),
-            Horizontal(
-                Button(
-                    "Uninstall",
-                    variant="error",
-                    id="uninstall-go",
-                    disabled=not choices,
+        # Two paths: with installed models we render the picker + Uninstall
+        # button; without any, we render an empty-state notice instead.
+        # An empty-options Select with allow_blank=False raises
+        # EmptySelectError on mount, so we route around it entirely.
+        if not choices:
+            yield Container(
+                self._back_toolbar(),
+                Static(
+                    "[b]Uninstall a model[/b]\n\n"
+                    "[yellow]No models are installed yet.[/yellow]\n"
+                    "[dim]Run 'Set up a model' from the menu first.[/dim]"
                 ),
-                id="uninstall-buttons",
-            ),
-            id="uninstall-body",
-        )
+                id="uninstall-body",
+            )
+        else:
+            yield Container(
+                self._back_toolbar(),
+                Static(
+                    "[b]Uninstall a model[/b]\n"
+                    "[dim]Removes the per-model repo + venv. Hugging Face "
+                    "weights in ~/.cache/huggingface/ are kept (shared across "
+                    "HF tools).[/dim]"
+                ),
+                Label("Model to uninstall:"),
+                Select(
+                    choices,
+                    id="uninstall-model",
+                    allow_blank=False,
+                    value=choices[0][1],
+                ),
+                Horizontal(
+                    Button("Uninstall", variant="error", id="uninstall-go"),
+                    id="uninstall-buttons",
+                ),
+                id="uninstall-body",
+            )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

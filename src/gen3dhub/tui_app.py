@@ -22,6 +22,8 @@ to return to the TUI menu — the app *never* exits implicitly.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import ClassVar
 
@@ -79,7 +81,7 @@ class MenuScreen(Screen):
     }
     MenuScreen #menu {
         width: 60;
-        height: 12;
+        height: 14;
         border: round $primary;
     }
     MenuScreen #menu-hint {
@@ -97,8 +99,10 @@ class MenuScreen(Screen):
             ListItem(Label("List supported models"), id="opt-list"),
             ListItem(Label("Set up a model"), id="opt-setup"),
             ListItem(Label("Run inference"), id="opt-run"),
+            ListItem(Label("View run history"), id="opt-history"),
             ListItem(Label("Run diagnostics (doctor)"), id="opt-doctor"),
             ListItem(Label("Uninstall a model (free disk)"), id="opt-uninstall"),
+            ListItem(Label("Manage gen3dhub on PATH"), id="opt-path"),
             ListItem(Label("View agent / scripting guide"), id="opt-agent"),
             ListItem(Label("Quit"), id="opt-quit"),
             id="menu",
@@ -116,8 +120,12 @@ class MenuScreen(Screen):
             self.app.push_screen(RunScreen())
         elif item_id == "opt-doctor":
             self.app.push_screen(DoctorScreen())
+        elif item_id == "opt-history":
+            self.app.push_screen(HistoryScreen())
         elif item_id == "opt-uninstall":
             self.app.push_screen(UninstallScreen())
+        elif item_id == "opt-path":
+            self.app.push_screen(PathManagementScreen())
         elif item_id == "opt-agent":
             self.app.push_screen(AgentGuideScreen())
         elif item_id == "opt-quit":
@@ -1088,6 +1096,296 @@ class UninstallScreen(_BackableScreen):
                     "~/.cache/huggingface/ (shared across HF tools)."
                 )
             input("\nPress Enter to return to the menu… ")
+
+
+# ---------------------------------------------------------------------------
+# Run history
+# ---------------------------------------------------------------------------
+
+
+class HistoryScreen(_BackableScreen):
+    """Browse past `gen3dhub run` invocations recorded in history.jsonl.
+
+    Click a row to see the full inputs/params/output of that run; the
+    "Print re-run command" button suspends Textual and prints the
+    equivalent `gen3dhub run …` invocation so the user can copy it.
+    Re-runs are deliberately *not* automatic — input files may have moved
+    and the user often wants to tweak something before re-running.
+    """
+
+    DEFAULT_CSS = """
+    HistoryScreen #history-body {
+        padding: 1 2;
+        height: 1fr;
+    }
+    HistoryScreen #history-table {
+        height: auto;
+        max-height: 60%;
+        margin-bottom: 1;
+    }
+    HistoryScreen #history-detail {
+        height: auto;
+        border-top: solid $primary;
+        padding: 1 0 0 0;
+    }
+    HistoryScreen #history-buttons {
+        height: 3;
+        padding: 1 0 0 0;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Container(
+            self._back_toolbar(),
+            Static("[b]Run history[/b]"),
+            DataTable(id="history-table", cursor_type="row", zebra_stripes=True),
+            Static(
+                "Run `gen3dhub run …` once and entries will appear here.",
+                id="history-detail",
+            ),
+            Horizontal(
+                Button("Print re-run command", id="history-rerun"),
+                id="history-buttons",
+            ),
+            id="history-body",
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        from gen3dhub import history as hist
+
+        table = self.query_one("#history-table", DataTable)
+        table.add_columns("ID", "When (UTC)", "Model", "Output", "Status", "Time")
+        # Most recent first — feels right for "history".
+        self._entries = list(reversed(hist.read_all(Paths.default())))
+        for entry in self._entries:
+            status = "✓" if entry.exit_code == 0 else "✗"
+            output_name = Path(entry.output).name if entry.output else "-"
+            table.add_row(
+                entry.id,
+                entry.timestamp,
+                entry.model,
+                output_name,
+                status,
+                f"{entry.duration_s:.1f}s",
+            )
+        if self._entries:
+            self._show_detail(self._entries[0])
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if event.cursor_row is None or event.cursor_row >= len(self._entries):
+            return
+        self._show_detail(self._entries[event.cursor_row])
+
+    def _show_detail(self, entry) -> None:
+        detail = self.query_one("#history-detail", Static)
+        inputs_str = (
+            ", ".join(f"{k}={v}" for k, v in entry.inputs.items()) or "(none)"
+        )
+        params_str = (
+            ", ".join(f"{k}={v}" for k, v in entry.params.items()) or "(none)"
+        )
+        detail.update(
+            f"[b]ID:[/b] {entry.id}\n"
+            f"[b]Inputs:[/b] {inputs_str}\n"
+            f"[b]Params:[/b] {params_str}\n"
+            f"[b]Output:[/b] {entry.output or '-'}\n"
+            f"[b]Preview:[/b] {entry.preview or '-'}\n"
+            f"[b]Duration:[/b] {entry.duration_s:.1f}s · "
+            f"[b]Exit code:[/b] {entry.exit_code}"
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
+        if event.button.id != "history-rerun":
+            return
+        # Pick the highlighted row.
+        table = self.query_one("#history-table", DataTable)
+        row = table.cursor_row
+        if row is None or row >= len(self._entries):
+            self.notify("No run selected.", severity="warning")
+            return
+        entry = self._entries[row]
+        self._print_rerun_command(entry)
+
+    def _print_rerun_command(self, entry) -> None:
+        import shlex
+
+        cmd = ["gen3dhub", "run", "--model", entry.model]
+        flag_for_kind = {"image": "--image", "mesh": "--mesh", "text": "--text"}
+        for kind, value in entry.inputs.items():
+            flag = flag_for_kind.get(kind)
+            if flag:
+                cmd.extend([flag, value])
+        if entry.output:
+            cmd.extend(["--output", entry.output])
+        for key, value in entry.params.items():
+            cmd.extend(["--param", f"{key}={value}"])
+        cmd.append("--yes")
+        with self.app.suspend():
+            print()
+            print(f"Equivalent command for run {entry.id}:")
+            print()
+            print("  " + " ".join(shlex.quote(c) for c in cmd))
+            print()
+            input("Press Enter to return to the menu… ")
+
+
+# ---------------------------------------------------------------------------
+# Manage gen3dhub on PATH (uv tool install / uninstall)
+# ---------------------------------------------------------------------------
+
+
+def _detect_project_source() -> Path | None:
+    """Return the gen3dhub project root if we're running from a dev checkout.
+
+    A "dev checkout" is heuristically a directory that contains a
+    `pyproject.toml` declaring `name = "gen3dhub"` AND a sibling `.venv/`.
+    The .venv check distinguishes the source repo from a uv-tool-installed
+    frozen copy (which lives under ~/.local/share/uv/tools/... and has no
+    sibling .venv). Returns None when no such source can be found, in
+    which case the install button gets disabled with a helpful message.
+    """
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        pyproject = parent / "pyproject.toml"
+        if not pyproject.exists():
+            continue
+        try:
+            content = pyproject.read_text()
+        except OSError:
+            continue
+        if 'name = "gen3dhub"' not in content:
+            continue
+        if (parent / ".venv").is_dir():
+            return parent
+    return None
+
+
+class PathManagementScreen(_BackableScreen):
+    """Install or remove gen3dhub from the user's PATH (uv tool install/uninstall).
+
+    Symmetric with the launcher's `./gen3dhub install` and `./gen3dhub
+    uninstall` actions — surfaced in the TUI for discoverability and for
+    users who never figured out the launcher script existed.
+
+    The Install button is only enabled when we can locate a gen3dhub project
+    source on disk (the cloned repo). Running this from a globally-installed
+    binary disables Install with a clear message — you'd be reinstalling
+    the same frozen copy against itself.
+    """
+
+    DEFAULT_CSS = """
+    PathManagementScreen #path-body {
+        padding: 1 2;
+        height: 1fr;
+    }
+    PathManagementScreen #path-status {
+        padding: 1 0;
+    }
+    PathManagementScreen #path-buttons {
+        height: 3;
+        padding: 1 0 0 0;
+    }
+    PathManagementScreen Button {
+        margin-right: 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Container(
+            self._back_toolbar(),
+            Static(
+                "[b]Manage gen3dhub on PATH[/b]\n"
+                "[dim]Wraps `uv tool install` / `uv tool uninstall`. After "
+                "install, the binary lives at ~/.local/bin/gen3dhub and you "
+                "can run `gen3dhub …` from any directory.[/dim]"
+            ),
+            Static("", id="path-status"),
+            Horizontal(
+                Button("Install / reinstall", variant="primary", id="path-install"),
+                Button("Uninstall global", variant="warning", id="path-uninstall"),
+                id="path-buttons",
+            ),
+            id="path-body",
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_status()
+
+    def _refresh_status(self) -> None:
+        installed_at = shutil.which("gen3dhub")
+        source = _detect_project_source()
+        lines = []
+        lines.append(
+            f"[b]On PATH:[/b] {installed_at}" if installed_at
+            else "[b]On PATH:[/b] [yellow]not found[/yellow]"
+        )
+        if source is not None:
+            lines.append(f"[b]Project source detected at:[/b] {source}")
+        else:
+            lines.append(
+                "[b]Project source:[/b] [yellow]not detected[/yellow] "
+                "(running from a frozen install? "
+                "Use `./gen3dhub install` from the cloned repo to update.)"
+            )
+        self.query_one("#path-status", Static).update("\n".join(lines))
+        # Disable the Install button when we can't find a source — there's
+        # nothing useful to install from.
+        self.query_one("#path-install", Button).disabled = source is None
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
+        if event.button.id == "path-install":
+            self._install()
+        elif event.button.id == "path-uninstall":
+            self._uninstall()
+
+    def _install(self) -> None:
+        source = _detect_project_source()
+        if source is None:
+            self.notify("Cannot detect project source.", severity="error")
+            return
+        with self.app.suspend():
+            print(f"Installing gen3dhub from {source} (uv tool install --reinstall)…")
+            print()
+            try:
+                subprocess.run(
+                    ["uv", "tool", "install", "--reinstall", str(source)],
+                    check=True,
+                )
+                print()
+                print("✓ Installed. From a new shell, try: gen3dhub --help")
+                print(
+                    "  If 'gen3dhub' is not found, ensure ~/.local/bin is on "
+                    "PATH (or run `uv tool update-shell`)."
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                print(f"✗ Install failed: {exc}")
+            input("\nPress Enter to return to the menu… ")
+        self._refresh_status()
+
+    def _uninstall(self) -> None:
+        with self.app.suspend():
+            print("Uninstalling global gen3dhub (uv tool uninstall)…")
+            print()
+            try:
+                subprocess.run(["uv", "tool", "uninstall", "gen3dhub"], check=True)
+                print()
+                print("✓ Removed. The currently-running TUI is unaffected — it'll")
+                print("  exit normally on Quit and the next 'gen3dhub' invocation")
+                print("  will only succeed if you launch via ./gen3dhub.")
+            except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                print(f"✗ Uninstall failed: {exc}")
+            input("\nPress Enter to return to the menu… ")
+        self._refresh_status()
 
 
 # ---------------------------------------------------------------------------

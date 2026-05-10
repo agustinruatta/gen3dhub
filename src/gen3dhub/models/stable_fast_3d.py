@@ -233,6 +233,11 @@ class StableFast3DAdapter(ModelAdapter):
             warn("You can still set HF_TOKEN in your environment as a fallback.")
             return
 
+        # huggingface_hub 1.x writes the token file with the umask-default
+        # mode (often 0644). Tighten to 0600 so the secret isn't readable by
+        # other users on the system.
+        _harden_token_file_mode()
+
         if _hf_can_access_repo(_HF_REPO_ID):
             success("Token saved and verified — access to the gated repository confirmed.")
         else:
@@ -333,9 +338,11 @@ def _hf_token_available() -> bool:
     if any(os.environ.get(name) for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
         return True
     try:
-        from huggingface_hub import HfFolder
+        # huggingface_hub.get_token() is the canonical, version-agnostic API.
+        # The legacy HfFolder shim was removed in huggingface_hub 1.x.
+        from huggingface_hub import get_token
 
-        return bool(HfFolder.get_token())
+        return bool(get_token())
     except Exception:
         return False
 
@@ -357,3 +364,26 @@ def _hf_can_access_repo(repo_id: str) -> bool:
 def _find_first_glb(root: Path) -> Path | None:
     matches = sorted(root.rglob("*.glb"))
     return matches[0] if matches else None
+
+
+def _harden_token_file_mode() -> None:
+    """Set ~/.cache/huggingface/token (or $HF_HOME/token) to mode 0600.
+
+    `huggingface_hub.login()` in 1.x leaves the file with the umask-default
+    mode (e.g. 0644), which means other local users can read the secret.
+    Best-effort: silently skip on platforms / file systems where chmod is
+    a no-op (e.g. Windows).
+    """
+    from contextlib import suppress
+
+    hf_home_env = os.environ.get("HF_HOME")
+    hf_home = (
+        Path(hf_home_env).expanduser()
+        if hf_home_env
+        else Path.home() / ".cache" / "huggingface"
+    )
+    token_file = hf_home / "token"
+    if not token_file.exists():
+        return
+    with suppress(OSError):
+        token_file.chmod(0o600)

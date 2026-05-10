@@ -632,9 +632,12 @@ class RunScreen(_BackableScreen):
         the user doesn't have to type it manually.
         """
         current = self.query_one(target_input_selector, Input).value.strip()
-        start = Path(current).expanduser().parent if current else Path.cwd()
+        # Default starting point: the user's home directory. Most user files
+        # live under $HOME, and the project dir / CWD is a poor default
+        # because it depends on where the launcher was invoked from.
+        start = Path(current).expanduser().parent if current else Path.home()
         if not start.exists():
-            start = Path.cwd()
+            start = Path.home()
 
         is_output = target_input_selector == "#run-output"
         title = "Pick the output path or a folder" if is_output else "Pick the input image"

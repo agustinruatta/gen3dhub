@@ -39,7 +39,20 @@ class StableFast3DAdapter(ModelAdapter):
     info = ModelInfo(
         id="stable-fast-3d",
         display_name="Stable Fast 3D",
-        summary="Image-to-3D: generates a textured GLB mesh from a single image (~1s on GPU).",
+        description=(
+            "Image-to-3D model from Stability AI. Produces a textured, "
+            "UV-unwrapped GLB mesh from a single photo."
+        ),
+        strengths=(
+            "~1s per asset on GPU",
+            "Includes PBR textures (roughness, metallic) and delighting",
+            "UV-unwrapped output, drop-in for game engines",
+        ),
+        weaknesses=(
+            "Lower geometric detail than newer DiT-based models",
+            "Gated on Hugging Face (license acceptance + token)",
+            "Object-centric bias — struggles with scenes",
+        ),
         homepage="https://huggingface.co/stabilityai/stable-fast-3d",
         license_url="https://huggingface.co/stabilityai/stable-fast-3d",
         requires_hf_auth=True,

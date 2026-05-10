@@ -125,10 +125,19 @@ class Hunyuan3D2Adapter(ModelAdapter):
     info = ModelInfo(
         id="hunyuan3d-2",
         display_name="Hunyuan3D-2 (mini)",
-        summary=(
-            "Image-to-3D: DiT-based shape model from Tencent. Higher fidelity than "
-            "SF3D, ~30s/asset on GPU. Mini 0.6B variant fits 8 GB VRAM. Shape-only "
-            "(no textures) for now."
+        description=(
+            "Image-to-3D using Tencent's DiT-based shape model (mini 0.6B variant). "
+            "Generates higher-fidelity geometry than SF3D."
+        ),
+        strengths=(
+            "Best geometric fidelity at this VRAM tier",
+            "Public on Hugging Face (no gating, no token required)",
+            "Generative DiT — handles harder shapes than feed-forward models",
+        ),
+        weaknesses=(
+            "Slower: ~30s per asset on GPU, 10+ min on CPU",
+            "Shape-only in this adapter — no textures yet",
+            "Tencent community license restricts EU/UK/KR",
         ),
         homepage="https://huggingface.co/tencent/Hunyuan3D-2mini",
         license_url=_LICENSE_URL,

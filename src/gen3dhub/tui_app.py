@@ -408,9 +408,13 @@ class ModelsScreen(_BackableScreen):
             if get_adapter(model.id, Paths.default()).is_installed
             else "[yellow]not installed[/yellow]"
         )
+        strengths = "\n".join(f"  • {s}" for s in model.strengths)
+        weaknesses = "\n".join(f"  • {w}" for w in model.weaknesses)
         detail.update(
             f"[b]{model.display_name}[/b]  ({installed})\n"
-            f"{model.summary}\n"
+            f"{model.description}\n\n"
+            f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
+            f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
             f"[dim]Homepage:[/dim] {model.homepage}"
         )
 

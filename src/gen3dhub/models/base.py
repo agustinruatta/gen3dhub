@@ -29,11 +29,18 @@ class InputSpec:
 
 @dataclass(frozen=True)
 class ModelInfo:
-    """Static metadata describing a model."""
+    """Static metadata describing a model.
+
+    `description` is a 1-2 sentence neutral statement of what the model does.
+    `strengths` and `weaknesses` are short bullet phrases (3-7 words each)
+    used to help users compare adapters at a glance from `gen3dhub list`.
+    """
 
     id: str
     display_name: str
-    summary: str
+    description: str
+    strengths: tuple[str, ...]
+    weaknesses: tuple[str, ...]
     homepage: str
     license_url: str | None
     requires_hf_auth: bool

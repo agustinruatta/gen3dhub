@@ -20,7 +20,6 @@ from typing import Annotated
 
 import typer
 from rich.panel import Panel
-from rich.table import Table
 
 from gen3dhub import __version__, tui
 from gen3dhub.config import Paths
@@ -70,18 +69,27 @@ def _root(
 
 @app.command("list")
 def list_command() -> None:
-    """List the models supported by this tool."""
-    models = list_models()
-    table = Table(title="Supported models", header_style="bold cyan")
-    table.add_column("ID", style="model")
-    table.add_column("Name")
-    table.add_column("Summary")
-    table.add_column("Inputs")
-    table.add_column("Output")
-    for m in models:
-        inputs = ", ".join(f"{i.name}({i.kind.value})" for i in m.inputs)
-        table.add_row(m.id, m.display_name, m.summary, inputs, m.output_extension)
-    console.print(table)
+    """List the models supported by this tool, with strengths and weaknesses."""
+    console.print("[bold cyan]Supported models[/bold cyan]\n")
+    for m in list_models():
+        inputs = ", ".join(f"{i.name} ({i.kind.value})" for i in m.inputs)
+        strengths = "\n".join(f"  • {s}" for s in m.strengths)
+        weaknesses = "\n".join(f"  • {w}" for w in m.weaknesses)
+        body = (
+            f"{m.description}\n\n"
+            f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
+            f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
+            f"[muted]Inputs:[/muted] {inputs}    "
+            f"[muted]Output:[/muted] {m.output_extension}"
+        )
+        console.print(
+            Panel(
+                body,
+                title=f"[model]{m.id}[/model]  ·  {m.display_name}",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +121,7 @@ def setup_command(
     adapter = get_adapter(model_id, paths)
     console.print(
         Panel.fit(
-            f"[model]{adapter.info.display_name}[/model]\n{adapter.info.summary}\n"
+            f"[model]{adapter.info.display_name}[/model]\n{adapter.info.description}\n"
             f"[muted]Homepage:[/muted] {adapter.info.homepage}",
             title="Setup",
             border_style="cyan",

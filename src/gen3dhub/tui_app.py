@@ -554,6 +554,11 @@ class RunScreen(_BackableScreen):
                 value=True,
                 id="run-auto-setup",
             ),
+            Checkbox(
+                "Force CPU inference (10-60x slower; use if GPU runs out of VRAM)",
+                value=False,
+                id="run-force-cpu",
+            ),
             Horizontal(
                 Button("Run", variant="primary", id="run-go"),
                 id="run-buttons",
@@ -594,10 +599,12 @@ class RunScreen(_BackableScreen):
             return
 
         auto_setup = self.query_one("#run-auto-setup", Checkbox).value
+        force_cpu = self.query_one("#run-force-cpu", Checkbox).value
 
         request = RunRequest(
             inputs=inputs,
             output_path=Path(output).expanduser() if output else None,
+            extra={"force_cpu": "1"} if force_cpu else {},
         )
         self._run_inference(adapter, request, auto_setup=auto_setup)
 

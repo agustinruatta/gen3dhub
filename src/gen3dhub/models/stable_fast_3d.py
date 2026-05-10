@@ -303,18 +303,44 @@ class StableFast3DAdapter(ModelAdapter):
         repo_dir = self.paths.model_repo_dir(self.model_id)
         venv_python = self._venv_python()
 
+        env = os.environ.copy()
+        # Reduce CUDA memory fragmentation. Important for 8 GB-class GPUs
+        # because SF3D's working set (~6 GB) lives close to the limit, and
+        # without this PyTorch leaves enough scattered free pages to fail a
+        # single contiguous allocation. Harmless on bigger GPUs.
+        env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+        force_cpu = bool(request.extra.get("force_cpu"))
+        if force_cpu:
+            # Hide every CUDA device from the subprocess. SF3D autodetects this
+            # and falls back to its CPU code path. ~10-60x slower than GPU but
+            # always works, regardless of VRAM pressure.
+            env["CUDA_VISIBLE_DEVICES"] = ""
+            info("Forcing CPU inference (--cpu / Force CPU enabled).")
+
         with tempfile.TemporaryDirectory(prefix="sf3d-") as staging:
             staging_dir = Path(staging)
             info(f"Running inference on {image_path.name}")
-            run_streaming(
-                [
-                    str(venv_python), "run.py",
-                    str(image_path),
-                    "--output-dir", str(staging_dir),
-                ],
-                cwd=repo_dir,
-                description="Running Stable Fast 3D inference",
-            )
+            try:
+                run_streaming(
+                    [
+                        str(venv_python), "run.py",
+                        str(image_path),
+                        "--output-dir", str(staging_dir),
+                    ],
+                    cwd=repo_dir,
+                    env=env,
+                    description="Running Stable Fast 3D inference",
+                )
+            except Exception:
+                if not force_cpu:
+                    warn(
+                        "If the failure above is `torch.OutOfMemoryError: CUDA out of "
+                        "memory`, your GPU doesn't have enough free VRAM right now. "
+                        "Either close other GPU-using apps (check with `nvidia-smi`) "
+                        "or re-run with --cpu (CLI) / 'Force CPU' (TUI)."
+                    )
+                raise
             produced = _find_first_glb(staging_dir)
             if produced is None:
                 raise RuntimeError(

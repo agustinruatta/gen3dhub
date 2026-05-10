@@ -142,6 +142,8 @@ TROUBLESHOOTING
     the model's license on its HF page (browser action).
   - "Cannot install Stable Fast 3D — system requirements not met": check
     `gen3dhub doctor` for specific tools missing.
-  - Inference fails with CUDA OOM: set CUDA_VISIBLE_DEVICES="" to force CPU,
-    or reduce input image size.
+  - Inference fails with CUDA OOM: pass `--cpu` to gen3dhub run, or close
+    other GPU-using apps (`nvidia-smi` shows them). The tool already sets
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True for you to reduce
+    fragmentation; --cpu is the next escape hatch.
 """

@@ -199,6 +199,16 @@ def run_command(
             "--yes", "-y", help="Skip confirmation prompts (for non-interactive use)."
         ),
     ] = False,
+    cpu: Annotated[
+        bool,
+        typer.Option(
+            "--cpu",
+            help=(
+                "Force CPU inference (10-60x slower; useful when the GPU runs out of "
+                "VRAM or for headless servers without CUDA)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
     import sys
@@ -230,7 +240,11 @@ def run_command(
     inputs = _resolve_inputs(model_info, image=image, text=text)
     output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)
 
-    request = RunRequest(inputs=dict(inputs), output_path=output_path)
+    request = RunRequest(
+        inputs=dict(inputs),
+        output_path=output_path,
+        extra={"force_cpu": "1"} if cpu else {},
+    )
     info(f"Running [model]{model_id}[/model]…")
     adapter.run(request)
 

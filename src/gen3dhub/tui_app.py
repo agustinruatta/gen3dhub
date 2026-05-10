@@ -133,6 +133,32 @@ class _BackableScreen(Screen):
         Binding("ctrl+c", "app.quit", "Quit", show=False),
     ]
 
+    # Shared CSS for the top "← Back" toolbar that every sub-screen renders
+    # via _back_toolbar(). Each subclass also defines its own DEFAULT_CSS;
+    # Textual aggregates DEFAULT_CSS up the inheritance chain so this rule
+    # applies everywhere.
+    DEFAULT_CSS = """
+    .screen-toolbar {
+        height: 3;
+        padding: 0 1;
+        align: left middle;
+    }
+    .screen-toolbar Button {
+        width: auto;
+    }
+    """
+
+    def _back_toolbar(self) -> Horizontal:
+        """Compose-time helper: a top toolbar with a "← Back" button.
+
+        Yield this as the first widget inside each screen's main Container so
+        users have a clickable back affordance in addition to Esc/Q.
+        """
+        return Horizontal(
+            Button("← Back", id="back-btn"),
+            classes="screen-toolbar",
+        )
+
     async def on_key(self, event):
         """Make Down/Up navigate the form like Tab/Shift+Tab.
 
@@ -379,6 +405,7 @@ class ModelsScreen(_BackableScreen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Container(
+            self._back_toolbar(),
             Static("[b]Supported models[/b]"),
             DataTable(id="models-table", cursor_type="row", zebra_stripes=True),
             Static("", id="models-detail"),
@@ -394,6 +421,10 @@ class ModelsScreen(_BackableScreen):
             table.add_row(m.id, m.display_name, inputs, m.output_extension)
         if list_models():
             self._show_detail(list_models()[0])
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         models = list_models()
@@ -446,6 +477,7 @@ class SetupScreen(_BackableScreen):
         first_id = list_models()[0].id if list_models() else Select.BLANK
         yield Header(show_clock=False)
         yield Container(
+            self._back_toolbar(),
             Static("[b]Set up a model[/b]"),
             Static(
                 "[dim]Clones the source repo, creates a per-model virtualenv, "
@@ -468,6 +500,9 @@ class SetupScreen(_BackableScreen):
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
         force = event.button.id == "setup-force"
         model_id = self.query_one("#setup-model", Select).value
         if not isinstance(model_id, str):
@@ -527,6 +562,7 @@ class RunScreen(_BackableScreen):
         first_id = list_models()[0].id if list_models() else Select.BLANK
         yield Header(show_clock=False)
         yield Container(
+            self._back_toolbar(),
             Static("[b]Run inference[/b]"),
             Static(
                 "[dim]Fill the inputs that apply to the chosen model. "
@@ -572,6 +608,9 @@ class RunScreen(_BackableScreen):
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
         if event.button.id == "run-browse-image":
             self._open_picker_for("#run-image")
             return
@@ -709,6 +748,7 @@ class DoctorScreen(_BackableScreen):
         ]
         yield Header(show_clock=False)
         yield Container(
+            self._back_toolbar(),
             Static("[b]Run diagnostics[/b]"),
             Static(
                 "[dim]Verifies installation, virtualenv, and Hugging Face "
@@ -725,6 +765,9 @@ class DoctorScreen(_BackableScreen):
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
         if event.button.id != "doctor-go":
             return
         target = self.query_one("#doctor-model", Select).value
@@ -752,21 +795,14 @@ class DoctorScreen(_BackableScreen):
 # ---------------------------------------------------------------------------
 
 
-class AgentGuideScreen(Screen):
+class AgentGuideScreen(_BackableScreen):
     """Read-only scrollable view of the same text printed by `gen3dhub agent`.
 
-    Useful when the user wants to see the non-interactive contract from inside
-    the TUI (e.g. to copy a command into a terminal or share with a teammate
-    automating the tool). Doesn't inherit from _BackableScreen because that
-    class hijacks Down/Up for focus traversal — here we want them to scroll
-    the guide content instead.
+    Inherits from _BackableScreen so it picks up the "← Back" toolbar helper
+    and shared CSS, but overrides `on_key` to a no-op so Down/Up keep
+    scrolling the guide content (the parent's on_key would otherwise hijack
+    them for focus traversal, which doesn't apply here).
     """
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "app.pop_screen", "Back"),
-        Binding("q", "app.pop_screen", "Back"),
-        Binding("ctrl+c", "app.quit", "Quit", show=False),
-    ]
 
     DEFAULT_CSS = """
     AgentGuideScreen #agent-body {
@@ -778,10 +814,16 @@ class AgentGuideScreen(Screen):
     }
     """
 
+    async def on_key(self, event):
+        # Override _BackableScreen.on_key with a no-op: VerticalScroll handles
+        # Down/Up natively for scrolling, which is what we want here.
+        return
+
     def compose(self) -> ComposeResult:
         from gen3dhub.agent_guide import AGENT_GUIDE
 
         yield Header(show_clock=False)
+        yield self._back_toolbar()
         yield VerticalScroll(
             Static(
                 "[b]Agent / scripting guide[/b]  "
@@ -794,6 +836,10 @@ class AgentGuideScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#agent-body", VerticalScroll).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
 
 
 # ---------------------------------------------------------------------------

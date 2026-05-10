@@ -458,6 +458,7 @@ class ModelsScreen(_BackableScreen):
         detail.update(
             f"[b]{model.display_name}[/b]  ({installed})\n"
             f"{model.description}\n\n"
+            f"[bold cyan]→ Best for[/bold cyan]\n  {model.best_for}\n\n"
             f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
             f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
             f"{fit_block}\n\n"
@@ -596,6 +597,12 @@ class RunScreen(_BackableScreen):
                 Button("Browse…", id="run-browse-image"),
                 classes="path-row",
             ),
+            Label("Mesh path (only used by mesh-input models like paint3d):"),
+            Horizontal(
+                Input(placeholder="/path/to/mesh.glb", id="run-mesh"),
+                Button("Browse…", id="run-browse-mesh"),
+                classes="path-row",
+            ),
             Label("Text prompt (only used by text-input models):"),
             Input(placeholder="(leave blank for image-input models)", id="run-text"),
             Label("Output path (optional — defaults to <stem>.<ext> in CWD):"),
@@ -629,6 +636,9 @@ class RunScreen(_BackableScreen):
         if event.button.id == "run-browse-image":
             self._open_picker_for("#run-image")
             return
+        if event.button.id == "run-browse-mesh":
+            self._open_picker_for("#run-mesh")
+            return
         if event.button.id == "run-browse-output":
             self._open_picker_for("#run-output")
             return
@@ -641,6 +651,7 @@ class RunScreen(_BackableScreen):
 
         image = self.query_one("#run-image", Input).value.strip()
         text = self.query_one("#run-text", Input).value.strip()
+        mesh = self.query_one("#run-mesh", Input).value.strip()
         output = self.query_one("#run-output", Input).value.strip()
 
         adapter = get_adapter(model_id, Paths.default())
@@ -650,6 +661,8 @@ class RunScreen(_BackableScreen):
                 inputs[spec.name] = image
             elif spec.kind is InputKind.TEXT and text:
                 inputs[spec.name] = text
+            elif spec.kind is InputKind.MESH and mesh:
+                inputs[spec.name] = mesh
 
         missing = [s.name for s in adapter.info.inputs if s.required and s.name not in inputs]
         if missing:

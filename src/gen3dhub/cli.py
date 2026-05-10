@@ -92,6 +92,7 @@ def list_command() -> None:
             fit_block += f"\n  [dim]{fit.detail}[/dim]"
         body = (
             f"{m.description}\n\n"
+            f"[bold cyan]→ Best for[/bold cyan]\n  {m.best_for}\n\n"
             f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
             f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
             f"{fit_block}\n\n"
@@ -206,6 +207,16 @@ def run_command(
         str | None,
         typer.Option("--text", "-t", help="Input text prompt (for text-input models)."),
     ] = None,
+    mesh: Annotated[
+        Path | None,
+        typer.Option(
+            "--mesh",
+            help=(
+                "Path to an existing 3D mesh (for mesh-input models like paint3d). "
+                "Accepts .obj / .glb / .ply / .off."
+            ),
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="Path where the produced artifact should be written."),
@@ -261,7 +272,7 @@ def run_command(
         # already configured.
         adapter.post_setup(interactive=interactive)
 
-    inputs = _resolve_inputs(model_info, image=image, text=text)
+    inputs = _resolve_inputs(model_info, image=image, text=text, mesh=mesh)
     output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)
 
     request = RunRequest(
@@ -283,8 +294,13 @@ def _resolve_inputs(
     *,
     image: Path | None,
     text: str | None,
+    mesh: Path | None,
 ) -> dict[str, str | Path]:
-    flag_values: dict[str, str | Path | None] = {"image": image, "text": text}
+    flag_values: dict[str, str | Path | None] = {
+        "image": image,
+        "text": text,
+        "mesh": mesh,
+    }
 
     inputs: dict[str, str | Path] = {}
     missing = []
@@ -315,8 +331,18 @@ def _resolve_output(
     if explicit is not None:
         return explicit.expanduser()
 
+    # Pick the most representative input as the basis for the default
+    # filename: mesh first (the thing being textured) for mesh-input models,
+    # image otherwise. For mesh-input models we suffix `_painted` so the
+    # output doesn't silently overwrite the input mesh.
+    mesh = inputs.get("mesh")
     image = inputs.get("image")
-    stem = Path(str(image)).stem if image is not None else "output"
+    if mesh is not None:
+        stem = f"{Path(str(mesh)).stem}_painted"
+    elif image is not None:
+        stem = Path(str(image)).stem
+    else:
+        stem = "output"
     default = Path.cwd() / f"{stem}{model_info.output_extension}"
 
     if yes:

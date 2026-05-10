@@ -15,6 +15,7 @@ class InputKind(StrEnum):
 
     IMAGE = "image"
     TEXT = "text"
+    MESH = "mesh"  # path to an existing 3D mesh (.obj, .glb, .ply, ...)
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,9 @@ class ModelInfo:
     """Static metadata describing a model.
 
     `description` is a 1-2 sentence neutral statement of what the model does.
-    `strengths` and `weaknesses` are short bullet phrases (3-7 words each)
-    used to help users compare adapters at a glance from `gen3dhub list`.
+    `best_for` is a single-sentence answer to "when should I pick this one?",
+    rendered prominently in `gen3dhub list` to make selection scannable.
+    `strengths` and `weaknesses` are short bullet phrases (3-7 words each).
     `hardware` declares VRAM/CPU expectations so we can render a
     "fit on this machine" verdict that compares against the live host.
     """
@@ -56,6 +58,7 @@ class ModelInfo:
     id: str
     display_name: str
     description: str
+    best_for: str
     strengths: tuple[str, ...]
     weaknesses: tuple[str, ...]
     hardware: HardwareNeeds

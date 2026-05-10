@@ -33,9 +33,9 @@ def collect_inputs(model: ModelInfo) -> dict[str, str]:
     collected: dict[str, str] = {}
     for spec in model.inputs:
         question = f"{spec.description}"
-        if spec.kind is InputKind.IMAGE:
+        if spec.kind in (InputKind.IMAGE, InputKind.MESH):
             value = questionary.path(question, only_directories=False).ask()
-        else:  # text, future kinds
+        else:  # text and future kinds
             value = questionary.text(question).ask()
         if value is None:
             raise SystemExit("Cancelled.")

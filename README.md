@@ -10,10 +10,11 @@ extensions, etc.) coexist on the same machine without conflict.
 
 ## Supported models
 
-| ID                | Type            | Input | Output | Min/Recommended VRAM | Notes |
-|-------------------|-----------------|-------|--------|----------------------|-------|
-| `stable-fast-3d`  | image → 3D mesh | image | `.glb` | 6 GB / 8 GB          | ~1s/asset on GPU, includes PBR textures. Gated on Hugging Face. |
-| `hunyuan3d-2`     | image → 3D mesh | image | `.glb` | 4 GB / 6 GB          | DiT-based, higher geometric fidelity than SF3D. ~30s/asset. Shape-only (no textures yet). Public on HF; restrictive Tencent community license. |
+| ID                | Type            | Inputs        | Output | Min/Recommended VRAM | Notes |
+|-------------------|-----------------|---------------|--------|----------------------|-------|
+| `stable-fast-3d`  | image → 3D mesh | image         | `.glb` | 6 GB / 8 GB          | ~1s/asset, includes PBR textures + delight. Gated on Hugging Face. |
+| `hunyuan3d-2`     | image → 3D mesh | image         | `.glb` | 4 GB / 6 GB          | DiT-based, higher geometric fidelity than SF3D. ~30s/asset. Shape-only (no textures yet). Tencent community license. |
+| `paint3d`         | mesh → textured mesh | mesh + image | `.glb` | 6 GB / 10 GB     | Adds textures to an existing mesh from a reference image. Apache 2.0. ~5-10 min/asset. Albedo-only (no PBR). No CPU mode. Pairs naturally with `hunyuan3d-2` for shape + texture. |
 
 Run **`gen3dhub list`** for the full breakdown — it shows each model's
 strengths, weaknesses, and a verdict ("comfortable" / "tight fit" / "GPU too
@@ -220,8 +221,11 @@ Flags:
 - `--model, -m` — model ID (see `list`).
 - `--image, -i` — input image path. Used by image-input models.
 - `--text, -t` — input text prompt. Used by text-input models (none yet).
-- `--output, -o` — destination path. Defaults to `./<image-stem>.<ext>` in
-  the current directory.
+- `--mesh` — path to an existing 3D mesh (`.obj` / `.glb` / `.ply` / `.off`).
+  Used by mesh-input models like `paint3d`.
+- `--output, -o` — destination path. Defaults to
+  `./<input-stem>.<ext>` in the current directory (or
+  `<mesh-stem>_painted.<ext>` for mesh-input models).
 - `--auto-setup / --no-auto-setup` — when on (default), the tool installs
   the model if missing instead of erroring out.
 - `--yes, -y` — skip all confirmation prompts. Required for non-interactive

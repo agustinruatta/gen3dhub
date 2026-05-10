@@ -44,6 +44,10 @@ class StableFast3DAdapter(ModelAdapter):
             "Image-to-3D model from Stability AI. Produces a textured, "
             "UV-unwrapped GLB mesh from a single photo."
         ),
+        best_for=(
+            "Fast iteration on game-asset prototypes — drops in to Unity / "
+            "Unreal with PBR materials and delight, no post-processing needed."
+        ),
         strengths=(
             "~1s per asset on GPU",
             "Includes PBR textures (roughness, metallic) and delighting",

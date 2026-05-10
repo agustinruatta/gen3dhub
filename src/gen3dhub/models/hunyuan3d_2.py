@@ -136,6 +136,10 @@ class Hunyuan3D2Adapter(ModelAdapter):
             "Image-to-3D using Tencent's DiT-based shape model (mini 0.6B variant). "
             "Generates higher-fidelity geometry than SF3D."
         ),
+        best_for=(
+            "Final-quality geometry when you don't need textures from this run. "
+            "Pair with `paint3d` to texture the resulting mesh."
+        ),
         strengths=(
             "Best geometric fidelity at this VRAM tier",
             "Public on Hugging Face (no gating, no token required)",

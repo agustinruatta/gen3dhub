@@ -312,11 +312,16 @@ class StableFast3DAdapter(ModelAdapter):
 
         force_cpu = bool(request.extra.get("force_cpu"))
         if force_cpu:
-            # Hide every CUDA device from the subprocess. SF3D autodetects this
-            # and falls back to its CPU code path. ~10-60x slower than GPU but
-            # always works, regardless of VRAM pressure.
-            env["CUDA_VISIBLE_DEVICES"] = ""
-            info("Forcing CPU inference (--cpu / Force CPU enabled).")
+            # Use SF3D's own opt-in env var instead of CUDA_VISIBLE_DEVICES="".
+            # Why: SF3D's requirements pin `rembg[gpu]`, which ships
+            # onnxruntime-gpu. That ORT build *requires* a visible CUDA device
+            # at session-init time and crashes ("CUDA failure 100: no
+            # CUDA-capable device is detected") if we hide every GPU. By
+            # setting SF3D_USE_CPU=1 we route only SF3D's main model (the
+            # ~6 GB memory hog) to CPU while leaving CUDA available for rembg's
+            # tiny ~100 MB session. Best of both worlds when GPU VRAM is tight.
+            env["SF3D_USE_CPU"] = "1"
+            info("Forcing CPU inference for SF3D's main model (rembg keeps GPU).")
 
         with tempfile.TemporaryDirectory(prefix="sf3d-") as staging:
             staging_dir = Path(staging)

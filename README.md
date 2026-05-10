@@ -23,6 +23,38 @@ small") computed against your live `nvidia-smi` reading.
 Adding new models is a matter of writing one adapter file (see *Adding a
 model* below). The CLI surface does not need to change.
 
+## Screenshots
+
+The TUI is built with [Textual](https://textual.textualize.io/). Every
+sub-screen has a `← Back` button and Esc/Q keybindings; long operations
+suspend the TUI so the underlying tool's output renders normally in the
+terminal.
+
+**Main menu** — entry point, navigate with arrow keys + Enter:
+
+![Main menu](docs/screenshots/menu.svg)
+
+**Run inference** — form with dynamic input rows (image / mesh / text)
+and per-model parameter widgets that re-render when you change the model
+in the Select. Shown with `paint3d` selected so all input rows are visible:
+
+![Run inference](docs/screenshots/run.svg)
+
+**Run history** — every past invocation logged from
+`~/.cache/gen3dhub/history.jsonl`. Cursor moves the highlight; the detail
+panel below updates with the full inputs / params / output / preview /
+duration / exit code:
+
+![Run history](docs/screenshots/history.svg)
+
+**Supported models** — table + detail panel with strengths, weaknesses,
+hardware fit verdict against the live host:
+
+![Supported models](docs/screenshots/models.svg)
+
+More screens (setup, doctor, uninstall, manage on PATH, agent guide,
+file picker) in [`docs/screenshots/`](docs/screenshots/).
+
 ## Requirements
 
 ### Universal (any Linux distro / macOS)

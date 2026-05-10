@@ -156,6 +156,34 @@ def check_build_toolchain() -> list[str]:
     return problems
 
 
+def directory_size_bytes(path: Path) -> int:
+    """Total size of all regular files under `path`. Symlinks are not followed.
+
+    Used by `gen3dhub uninstall` to tell the user how much disk it's about to
+    free. Best-effort: unreadable files are silently skipped rather than raising,
+    because partial-install dirs can have transient permission issues.
+    """
+    total = 0
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_file() and not entry.is_symlink():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def format_bytes(num_bytes: int) -> str:
+    """Pretty-print a byte count using KiB / MiB / GiB units."""
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    size = float(num_bytes)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{num_bytes} B"  # unreachable
+
+
 def system_summary() -> str:
     """One-line description of the host environment, useful for doctor output."""
     vram = gpu_vram_mb()

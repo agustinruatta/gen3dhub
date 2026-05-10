@@ -23,7 +23,7 @@ from rich.panel import Panel
 
 from gen3dhub import __version__, tui
 from gen3dhub.config import Paths
-from gen3dhub.console import console, error, info, success
+from gen3dhub.console import console, error, info, success, warn
 from gen3dhub.models.base import ModelInfo, ParamKind, ParamSpec, RunRequest
 from gen3dhub.registry import get_adapter, known_model_ids, list_models
 
@@ -168,6 +168,90 @@ def setup_command(
     )
     adapter.setup(force=force)
     adapter.post_setup(interactive=sys.stdin.isatty())
+
+
+# ---------------------------------------------------------------------------
+# uninstall
+# ---------------------------------------------------------------------------
+
+
+@app.command("uninstall")
+def uninstall_command(
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help=f"Model ID. One of: {', '.join(known_model_ids())}"),
+    ] = None,
+    all_: Annotated[
+        bool,
+        typer.Option(
+            "--all", help="Uninstall every model. Mutually exclusive with --model."
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes", "-y", help="Skip the per-model confirmation prompt."
+        ),
+    ] = False,
+) -> None:
+    """Remove an installed model's repo + venv to reclaim disk space.
+
+    Does NOT touch the Hugging Face weights cache (`~/.cache/huggingface/`),
+    which is shared across HF tools. To clean those, see
+    `huggingface-cli scan-cache` and `huggingface-cli delete-cache`.
+    """
+    import shutil
+
+    from gen3dhub.utils.system import directory_size_bytes, format_bytes
+
+    if all_ and model:
+        error("Pass either --model or --all, not both.")
+        raise typer.Exit(2)
+
+    paths = Paths.default()
+    paths.ensure()
+
+    if all_:
+        targets = [m for m in known_model_ids() if paths.model_dir(m).exists()]
+        if not targets:
+            info("Nothing to uninstall — no model directories present.")
+            return
+    elif model:
+        targets = [model]
+    else:
+        # No flag → interactive pick. Show only installed models.
+        installed = [m for m in known_model_ids() if paths.model_dir(m).exists()]
+        if not installed:
+            info("Nothing to uninstall — no model directories present.")
+            return
+        targets = [tui.select_model("Which model do you want to uninstall?")]
+
+    total_freed = 0
+    for model_id in targets:
+        model_dir = paths.model_dir(model_id)
+        if not model_dir.exists():
+            warn(f"'{model_id}' is not installed (no dir at {model_dir}).")
+            continue
+        size_bytes = directory_size_bytes(model_dir)
+        size_human = format_bytes(size_bytes)
+        if not yes and not tui.confirm(
+            f"Remove {model_dir} ({size_human})?", default=False
+        ):
+            info(f"Skipped '{model_id}'.")
+            continue
+        info(f"Removing {model_dir}")
+        shutil.rmtree(model_dir)
+        success(f"Uninstalled '{model_id}' (freed ~{size_human})")
+        total_freed += size_bytes
+
+    if total_freed > 0:
+        success(f"Total freed: {format_bytes(total_freed)}")
+        info(
+            "Note: model weights downloaded by Hugging Face are kept in "
+            "~/.cache/huggingface/ (shared across HF tools). To inspect or "
+            "clean them, run `huggingface-cli scan-cache` and "
+            "`huggingface-cli delete-cache`."
+        )
 
 
 # ---------------------------------------------------------------------------

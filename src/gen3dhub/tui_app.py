@@ -79,7 +79,7 @@ class MenuScreen(Screen):
     }
     MenuScreen #menu {
         width: 60;
-        height: 11;
+        height: 12;
         border: round $primary;
     }
     MenuScreen #menu-hint {
@@ -98,6 +98,7 @@ class MenuScreen(Screen):
             ListItem(Label("Set up a model"), id="opt-setup"),
             ListItem(Label("Run inference"), id="opt-run"),
             ListItem(Label("Run diagnostics (doctor)"), id="opt-doctor"),
+            ListItem(Label("Uninstall a model (free disk)"), id="opt-uninstall"),
             ListItem(Label("View agent / scripting guide"), id="opt-agent"),
             ListItem(Label("Quit"), id="opt-quit"),
             id="menu",
@@ -115,6 +116,8 @@ class MenuScreen(Screen):
             self.app.push_screen(RunScreen())
         elif item_id == "opt-doctor":
             self.app.push_screen(DoctorScreen())
+        elif item_id == "opt-uninstall":
+            self.app.push_screen(UninstallScreen())
         elif item_id == "opt-agent":
             self.app.push_screen(AgentGuideScreen())
         elif item_id == "opt-quit":
@@ -942,6 +945,109 @@ class DoctorScreen(_BackableScreen):
                 else:
                     for p in problems:
                         print(f"  ✗ {p}")
+            input("\nPress Enter to return to the menu… ")
+
+
+# ---------------------------------------------------------------------------
+# Uninstall (reclaim disk)
+# ---------------------------------------------------------------------------
+
+
+class UninstallScreen(_BackableScreen):
+    """Pick an installed model and remove its repo + venv to reclaim disk space.
+
+    Live disk-size readout next to each model so the user knows what they're
+    freeing before they confirm.
+    """
+
+    DEFAULT_CSS = """
+    UninstallScreen #uninstall-body {
+        padding: 1 2;
+        height: 1fr;
+    }
+    UninstallScreen Label {
+        padding: 1 0 0 0;
+    }
+    UninstallScreen #uninstall-buttons {
+        height: 3;
+        padding: 1 0 0 0;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        from gen3dhub.utils.system import directory_size_bytes, format_bytes
+
+        paths = Paths.default()
+        # Build choices showing only installed models with their disk footprint.
+        choices = []
+        for m in list_models():
+            model_dir = paths.model_dir(m.id)
+            if not model_dir.exists():
+                continue
+            size = format_bytes(directory_size_bytes(model_dir))
+            choices.append((f"{m.display_name}  ({size})  —  {m.id}", m.id))
+
+        yield Header(show_clock=False)
+        yield Container(
+            self._back_toolbar(),
+            Static(
+                "[b]Uninstall a model[/b]\n"
+                "[dim]Removes the per-model repo + venv. Hugging Face weights "
+                "in ~/.cache/huggingface/ are kept (shared across HF tools).[/dim]"
+            ),
+            Label("Model to uninstall:"),
+            Select(
+                choices,
+                id="uninstall-model",
+                allow_blank=False,
+                prompt="(no models installed)" if not choices else "Pick one",
+                value=choices[0][1] if choices else Select.BLANK,
+            ),
+            Horizontal(
+                Button(
+                    "Uninstall",
+                    variant="error",
+                    id="uninstall-go",
+                    disabled=not choices,
+                ),
+                id="uninstall-buttons",
+            ),
+            id="uninstall-body",
+        )
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "back-btn":
+            self.app.pop_screen()
+            return
+        if event.button.id != "uninstall-go":
+            return
+        model_id = self.query_one("#uninstall-model", Select).value
+        if not isinstance(model_id, str):
+            self.app.bell()
+            return
+        self._run_uninstall(model_id)
+
+    def _run_uninstall(self, model_id: str) -> None:
+        import shutil
+
+        from gen3dhub.utils.system import directory_size_bytes, format_bytes
+
+        paths = Paths.default()
+        model_dir = paths.model_dir(model_id)
+        with self.app.suspend():
+            if not model_dir.exists():
+                error(f"'{model_id}' is not installed (no dir at {model_dir})")
+            else:
+                size = format_bytes(directory_size_bytes(model_dir))
+                print(f"Removing {model_dir} ({size})…")
+                shutil.rmtree(model_dir)
+                print(f"✓ Uninstalled '{model_id}' (freed ~{size})")
+                print()
+                print(
+                    "Note: model weights downloaded by Hugging Face are kept in "
+                    "~/.cache/huggingface/ (shared across HF tools)."
+                )
             input("\nPress Enter to return to the menu… ")
 
 

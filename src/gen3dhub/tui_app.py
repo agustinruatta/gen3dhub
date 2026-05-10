@@ -591,20 +591,22 @@ class RunScreen(_BackableScreen):
                 allow_blank=False,
                 value=first_id,
             ),
-            Label("Image path:"),
+            Label("Image path:", id="run-image-label"),
             Horizontal(
                 Input(placeholder="/path/to/input.png", id="run-image"),
                 Button("Browse…", id="run-browse-image"),
                 classes="path-row",
+                id="run-image-row",
             ),
-            Label("Mesh path (only used by mesh-input models like paint3d):"),
+            Label("Mesh path:", id="run-mesh-label"),
             Horizontal(
                 Input(placeholder="/path/to/mesh.glb", id="run-mesh"),
                 Button("Browse…", id="run-browse-mesh"),
                 classes="path-row",
+                id="run-mesh-row",
             ),
-            Label("Text prompt (only used by text-input models):"),
-            Input(placeholder="(leave blank for image-input models)", id="run-text"),
+            Label("Text prompt:", id="run-text-label"),
+            Input(placeholder="Describe what to generate…", id="run-text"),
             Label("Output path (optional — defaults to <stem>.<ext> in CWD):"),
             Horizontal(
                 Input(placeholder="/path/to/output.glb", id="run-output"),
@@ -628,6 +630,43 @@ class RunScreen(_BackableScreen):
             id="run-body",
         )
         yield Footer()
+
+    def on_mount(self) -> None:
+        # Hide the input rows that don't apply to the model chosen by default.
+        initial = self.query_one("#run-model", Select).value
+        if isinstance(initial, str):
+            self._refresh_input_visibility(initial)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        # Only react to the model picker — Selects on other screens reuse the
+        # same event type but we don't care about them here.
+        if event.select.id != "run-model":
+            return
+        if isinstance(event.value, str):
+            self._refresh_input_visibility(event.value)
+
+    def _refresh_input_visibility(self, model_id: str) -> None:
+        """Show/hide image/mesh/text rows based on the selected model's InputSpec.
+
+        Stale values are intentionally left in the hidden Inputs — they're
+        already filtered out at submit time because we only read inputs whose
+        kind appears in the adapter's `info.inputs`. So switching back to a
+        model that uses a previously-hidden input restores the value.
+        """
+        try:
+            adapter = get_adapter(model_id, Paths.default())
+        except KeyError:
+            return
+        needed = {spec.kind for spec in adapter.info.inputs}
+        sections = [
+            (InputKind.IMAGE, "#run-image-label", "#run-image-row"),
+            (InputKind.MESH, "#run-mesh-label", "#run-mesh-row"),
+            (InputKind.TEXT, "#run-text-label", "#run-text"),
+        ]
+        for kind, label_sel, widget_sel in sections:
+            visible = kind in needed
+            self.query_one(label_sel).display = visible
+            self.query_one(widget_sel).display = visible
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back-btn":

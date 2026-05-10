@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 SCREENSHOTS_DIR = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
 SIZE = (120, 38)
+
+# Demo paths shown inside the captured screens. Kept neutral so the published
+# SVGs don't bake in the maintainer's actual filesystem layout.
+DEMO_HOME = "/home/user"
 
 
 async def _take(app, output: Path, *, title: str | None = None) -> None:
@@ -111,10 +116,10 @@ async def capture_history(temp_cache: Path) -> None:
             id="20260510-141502-a3f9c2",
             timestamp="2026-05-10T14:15:02Z",
             model="stable-fast-3d",
-            inputs={"image": "/home/user/refs/cat.png"},
+            inputs={"image": "~/refs/cat.png"},
             params={"remesh_option": "quad", "texture_resolution": "2048"},
-            output="/home/user/assets/cat.glb",
-            preview="/home/user/assets/cat.preview.png",
+            output="~/assets/cat.glb",
+            preview="~/assets/cat.preview.png",
             duration_s=1.4,
             exit_code=0,
         ),
@@ -122,10 +127,10 @@ async def capture_history(temp_cache: Path) -> None:
             id="20260510-145837-b7d108",
             timestamp="2026-05-10T14:58:37Z",
             model="hunyuan3d-2",
-            inputs={"image": "/home/user/refs/dragon.png"},
+            inputs={"image": "~/refs/dragon.png"},
             params={"octree_resolution": "512", "seed": "42"},
-            output="/home/user/assets/dragon_shape.glb",
-            preview="/home/user/assets/dragon_shape.preview.png",
+            output="~/assets/dragon_shape.glb",
+            preview="~/assets/dragon_shape.preview.png",
             duration_s=28.7,
             exit_code=0,
         ),
@@ -134,12 +139,12 @@ async def capture_history(temp_cache: Path) -> None:
             timestamp="2026-05-10T15:22:44Z",
             model="paint3d",
             inputs={
-                "mesh": "/home/user/assets/dragon_shape.glb",
-                "image": "/home/user/refs/dragon.png",
+                "mesh": "~/assets/dragon_shape.glb",
+                "image": "~/refs/dragon.png",
             },
             params={"prompt": "fierce red dragon, scales detail"},
-            output="/home/user/assets/dragon_textured.glb",
-            preview="/home/user/assets/dragon_textured.preview.png",
+            output="~/assets/dragon_textured.glb",
+            preview="~/assets/dragon_textured.preview.png",
             duration_s=412.0,
             exit_code=0,
         ),
@@ -185,14 +190,38 @@ async def capture_uninstall(temp_cache: Path) -> None:
 
 
 async def capture_path_management() -> None:
+    """Render the path-management screen with a neutral, synthetic install layout.
+
+    The screen normally shows the real `shutil.which("gen3dhub")` and the
+    detected dev-checkout root — both reveal the maintainer's filesystem.
+    For published screenshots we monkey-patch both to display a typical
+    `uv tool install` layout under DEMO_HOME instead.
+    """
+    import shutil as _shutil
+
+    from gen3dhub import tui_app
     from gen3dhub.tui_app import ModelSelectorApp, PathManagementScreen
 
-    app = ModelSelectorApp()
-    async with app.run_test(size=SIZE) as pilot:
-        await pilot.pause()
-        await app.push_screen(PathManagementScreen())
-        await pilot.pause(0.3)
-        await _take(app, SCREENSHOTS_DIR / "path-management.svg", title="Manage on PATH")
+    orig_which = _shutil.which
+    orig_detect = tui_app._detect_project_source
+
+    def fake_which(cmd: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd == "gen3dhub":
+            return f"{DEMO_HOME}/.local/bin/gen3dhub"
+        return orig_which(cmd, *args, **kwargs)
+
+    _shutil.which = fake_which  # type: ignore[assignment]
+    tui_app._detect_project_source = lambda: Path(f"{DEMO_HOME}/Projects/gen3dhub")
+    try:
+        app = ModelSelectorApp()
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            await app.push_screen(PathManagementScreen())
+            await pilot.pause(0.3)
+            await _take(app, SCREENSHOTS_DIR / "path-management.svg", title="Manage on PATH")
+    finally:
+        _shutil.which = orig_which  # type: ignore[assignment]
+        tui_app._detect_project_source = orig_detect
 
 
 async def capture_agent_guide() -> None:
@@ -207,16 +236,63 @@ async def capture_agent_guide() -> None:
 
 
 async def capture_file_picker() -> None:
+    """Render the file picker rooted at a fake $HOME with neutral sample dirs.
+
+    The picker opens at `Path.home()` when no path is pre-filled, which would
+    otherwise leak the maintainer's real home directory listing into the SVG.
+    We override $HOME for the duration of this capture so the path bar and the
+    listed entries are synthetic.
+    """
     from gen3dhub.tui_app import ModelSelectorApp, RunScreen
 
-    app = ModelSelectorApp()
-    async with app.run_test(size=SIZE) as pilot:
-        await pilot.pause()
-        await app.push_screen(RunScreen())
-        await pilot.pause(0.3)
-        await pilot.click("#run-browse-image")
-        await pilot.pause(0.4)
-        await _take(app, SCREENSHOTS_DIR / "file-picker.svg", title="Pick a file")
+    real_home = os.environ.get("HOME")
+    with tempfile.TemporaryDirectory(prefix="gen3dhub-fake-home-") as fake_home:
+        fake_home_path = Path(fake_home)
+        # Populate with a handful of plausible-looking entries so the listing
+        # doesn't appear empty in the screenshot.
+        for sub in ("Documents", "Downloads", "Pictures", "Projects", "assets", "refs"):
+            (fake_home_path / sub).mkdir()
+        (fake_home_path / "notes.txt").write_text("")
+
+        os.environ["HOME"] = str(fake_home_path)
+        try:
+            app = ModelSelectorApp()
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause()
+                await app.push_screen(RunScreen())
+                await pilot.pause(0.3)
+                await pilot.click("#run-browse-image")
+                await pilot.pause(0.4)
+                svg_path = SCREENSHOTS_DIR / "file-picker.svg"
+                await _take(app, svg_path, title="Pick a file")
+                # Swap the throwaway tempdir path that ended up in the path bar
+                # for the neutral DEMO_HOME used elsewhere in the docs.
+                svg_path.write_text(
+                    svg_path.read_text().replace(str(fake_home_path), DEMO_HOME)
+                )
+        finally:
+            if real_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = real_home
+
+
+def _scrub_real_home_paths() -> None:
+    """Replace any leftover real-user home prefix in generated SVGs with DEMO_HOME.
+
+    Belt-and-suspenders against accidental personal-path leakage: every capture
+    is supposed to run with neutralized paths, but if any new screen surfaces
+    `Path.home()` or a CWD that we forgot to mock, this pass catches it before
+    the SVGs hit a public repo.
+    """
+    real_home = str(Path.home())
+    pattern = re.compile(re.escape(real_home))
+    for svg in SCREENSHOTS_DIR.glob("*.svg"):
+        text = svg.read_text()
+        new_text, n = pattern.subn(DEMO_HOME, text)
+        if n:
+            svg.write_text(new_text)
+            print(f"  scrubbed {n} occurrence(s) of $HOME in {svg.name}")
 
 
 async def main() -> None:
@@ -239,6 +315,8 @@ async def main() -> None:
         await capture_path_management()
         await capture_agent_guide()
         await capture_file_picker()
+
+    _scrub_real_home_paths()
 
     print(f"\nDone. {len(list(SCREENSHOTS_DIR.glob('*.svg')))} SVG files written.")
 

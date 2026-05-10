@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "TUI/CLI hub to download, configure, and run AI models that generate 3D assets (image-to-3D, text-to-3D, etc.) with isolated per-model environments."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Agustin Ruatta" }]
 dependencies = [
     "typer>=0.12.5",

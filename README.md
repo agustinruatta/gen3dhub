@@ -495,4 +495,15 @@ existing manual `gen3dhub run …` flow.
 
 ## License
 
-MIT.
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).
+
+This is a strong copyleft license: redistribution and derivative works
+must be released under the same terms. The license text in `LICENSE` is
+the verbatim FSF copy.
+
+Note that the **upstream models** wrapped by gen3dhub keep their own
+licenses — Stability AI Community License for SF3D, Tencent Hunyuan
+Community License for Hunyuan3D-2, Apache 2.0 for Paint3D — and those
+apply to their respective code, weights, and outputs independent of
+this tool's licensing. See each model's `homepage` / `license_url` in
+`gen3dhub list` for details.

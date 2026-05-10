@@ -8,10 +8,17 @@ print a distro-aware command the user can copy-paste to install it.
 
 from __future__ import annotations
 
+import functools
 import platform
 import shutil
+import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gen3dhub.models.base import HardwareNeeds
 
 
 def has_command(name: str) -> bool:
@@ -32,8 +39,6 @@ def has_nvidia_gpu() -> bool:
     if not has_command("nvidia-smi"):
         return False
     try:
-        import subprocess
-
         result = subprocess.run(
             ["nvidia-smi", "-L"],
             capture_output=True,
@@ -44,6 +49,39 @@ def has_nvidia_gpu() -> bool:
         return result.returncode == 0 and "GPU" in result.stdout
     except Exception:
         return False
+
+
+@functools.cache
+def gpu_vram_mb() -> int | None:
+    """Total VRAM (MiB) of the largest visible NVIDIA GPU, or None.
+
+    Cached for the life of the process — VRAM doesn't change at runtime, and
+    `gen3dhub list` calls this once per model.
+    """
+    if not has_nvidia_gpu():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        values = [
+            int(line.strip())
+            for line in result.stdout.splitlines()
+            if line.strip().isdigit()
+        ]
+        return max(values) if values else None
+    except Exception:
+        return None
 
 
 def detect_distro() -> str:
@@ -120,8 +158,84 @@ def check_build_toolchain() -> list[str]:
 
 def system_summary() -> str:
     """One-line description of the host environment, useful for doctor output."""
+    vram = gpu_vram_mb()
+    gpu_descr = f"NVIDIA {vram / 1024:.1f} GB" if vram else "no NVIDIA GPU"
     return (
         f"{detect_distro()} · {platform.machine()} · "
         f"python {sys.version_info.major}.{sys.version_info.minor} · "
-        f"GPU: {'yes (NVIDIA)' if has_nvidia_gpu() else 'no / non-NVIDIA'}"
+        f"GPU: {gpu_descr}"
+    )
+
+
+@dataclass(frozen=True)
+class FitVerdict:
+    """Result of comparing a model's HardwareNeeds against the current host."""
+
+    severity: str  # "ok" | "warn" | "error"
+    headline: str  # one-line verdict
+    detail: str    # supplementary line; may be empty
+
+
+def assess_fit(needs: HardwareNeeds) -> FitVerdict:
+    """Compare a model's declared hardware needs against the local host.
+
+    Returns a FitVerdict the CLI/TUI can render. Best-effort and never raises:
+    no GPU info still produces a verdict (CPU-mode warning or hard error
+    depending on whether the model supports CPU fallback).
+    """
+    vram_mb = gpu_vram_mb()
+
+    if vram_mb is None:
+        if needs.cpu_fallback:
+            return FitVerdict(
+                severity="warn",
+                headline=f"No NVIDIA GPU detected — CPU only ({needs.cpu_speed_hint})",
+                detail="Pass --cpu when running.",
+            )
+        return FitVerdict(
+            severity="error",
+            headline="No NVIDIA GPU detected and this model has no CPU fallback",
+            detail="",
+        )
+
+    vram_gb = vram_mb / 1024
+
+    if vram_gb >= needs.recommended_gpu_vram_gb:
+        return FitVerdict(
+            severity="ok",
+            headline=(
+                f"Comfortable on GPU "
+                f"(have {vram_gb:.1f} GB · needs {needs.recommended_gpu_vram_gb:.0f} GB)"
+            ),
+            detail="",
+        )
+
+    if vram_gb >= needs.min_gpu_vram_gb:
+        return FitVerdict(
+            severity="warn",
+            headline=(
+                f"Tight fit on GPU "
+                f"(have {vram_gb:.1f} GB · needs {needs.min_gpu_vram_gb:.0f} GB min, "
+                f"{needs.recommended_gpu_vram_gb:.0f} GB comfortable)"
+            ),
+            detail="Close other GPU-using apps before running. If OOM, fall back to --cpu.",
+        )
+
+    if needs.cpu_fallback:
+        return FitVerdict(
+            severity="warn",
+            headline=(
+                f"GPU too small (have {vram_gb:.1f} GB · "
+                f"needs {needs.min_gpu_vram_gb:.0f} GB)"
+            ),
+            detail=f"Use --cpu ({needs.cpu_speed_hint}).",
+        )
+
+    return FitVerdict(
+        severity="error",
+        headline=(
+            f"Insufficient VRAM (have {vram_gb:.1f} GB · "
+            f"needs {needs.min_gpu_vram_gb:.0f} GB) and no CPU fallback"
+        ),
+        detail="",
     )

@@ -28,6 +28,7 @@ from pathlib import Path
 
 from gen3dhub.console import info, success, warn
 from gen3dhub.models.base import (
+    HardwareNeeds,
     InputKind,
     InputSpec,
     ModelAdapter,
@@ -144,6 +145,12 @@ class Hunyuan3D2Adapter(ModelAdapter):
             "Slower: ~30s per asset on GPU, 10+ min on CPU",
             "Shape-only in this adapter — no textures yet",
             "Tencent community license restricts EU/UK/KR",
+        ),
+        hardware=HardwareNeeds(
+            min_gpu_vram_gb=4.0,
+            recommended_gpu_vram_gb=6.0,
+            cpu_fallback=True,
+            cpu_speed_hint="10+ min/asset",
         ),
         homepage="https://huggingface.co/tencent/Hunyuan3D-2mini",
         license_url=_LICENSE_URL,

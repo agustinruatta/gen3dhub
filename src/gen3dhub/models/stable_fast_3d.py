@@ -15,6 +15,7 @@ from pathlib import Path
 
 from gen3dhub.console import error, info, success, warn
 from gen3dhub.models.base import (
+    HardwareNeeds,
     InputKind,
     InputSpec,
     ModelAdapter,
@@ -52,6 +53,12 @@ class StableFast3DAdapter(ModelAdapter):
             "Lower geometric detail than newer DiT-based models",
             "Gated on Hugging Face (license acceptance + token)",
             "Object-centric bias — struggles with scenes",
+        ),
+        hardware=HardwareNeeds(
+            min_gpu_vram_gb=6.0,
+            recommended_gpu_vram_gb=8.0,
+            cpu_fallback=True,
+            cpu_speed_hint="30-60s/asset",
         ),
         homepage="https://huggingface.co/stabilityai/stable-fast-3d",
         license_url="https://huggingface.co/stabilityai/stable-fast-3d",

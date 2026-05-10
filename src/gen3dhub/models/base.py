@@ -28,12 +28,29 @@ class InputSpec:
 
 
 @dataclass(frozen=True)
+class HardwareNeeds:
+    """What a model needs from the host hardware.
+
+    All numbers are best-effort estimates from upstream docs and community
+    reports — they're used to render a "fit on this machine" verdict in
+    `gen3dhub list`, not as hard gates. The user can always try anyway.
+    """
+
+    min_gpu_vram_gb: float          # below this, GPU mode won't fit
+    recommended_gpu_vram_gb: float  # comfortable headroom on GPU
+    cpu_fallback: bool              # works at all on CPU
+    cpu_speed_hint: str             # e.g. "30s/asset" or "10+ min/asset"
+
+
+@dataclass(frozen=True)
 class ModelInfo:
     """Static metadata describing a model.
 
     `description` is a 1-2 sentence neutral statement of what the model does.
     `strengths` and `weaknesses` are short bullet phrases (3-7 words each)
     used to help users compare adapters at a glance from `gen3dhub list`.
+    `hardware` declares VRAM/CPU expectations so we can render a
+    "fit on this machine" verdict that compares against the live host.
     """
 
     id: str
@@ -41,6 +58,7 @@ class ModelInfo:
     description: str
     strengths: tuple[str, ...]
     weaknesses: tuple[str, ...]
+    hardware: HardwareNeeds
     homepage: str
     license_url: str | None
     requires_hf_auth: bool

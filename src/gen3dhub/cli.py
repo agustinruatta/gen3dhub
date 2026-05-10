@@ -69,16 +69,32 @@ def _root(
 
 @app.command("list")
 def list_command() -> None:
-    """List the models supported by this tool, with strengths and weaknesses."""
-    console.print("[bold cyan]Supported models[/bold cyan]\n")
+    """List the models supported by this tool, with strengths, weaknesses,
+    and a fit assessment against the current host."""
+    from gen3dhub.utils.system import assess_fit, system_summary
+
+    console.print(f"[muted]Host:[/muted] {system_summary()}\n")
     for m in list_models():
         inputs = ", ".join(f"{i.name} ({i.kind.value})" for i in m.inputs)
         strengths = "\n".join(f"  • {s}" for s in m.strengths)
         weaknesses = "\n".join(f"  • {w}" for w in m.weaknesses)
+        fit = assess_fit(m.hardware)
+        fit_color, fit_icon = {
+            "ok": ("green", "✓"),
+            "warn": ("yellow", "⚠"),
+            "error": ("red", "✗"),
+        }[fit.severity]
+        fit_block = (
+            f"[bold {fit_color}]{fit_icon} On this machine[/bold {fit_color}]\n"
+            f"  {fit.headline}"
+        )
+        if fit.detail:
+            fit_block += f"\n  [dim]{fit.detail}[/dim]"
         body = (
             f"{m.description}\n\n"
             f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
             f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
+            f"{fit_block}\n\n"
             f"[muted]Inputs:[/muted] {inputs}    "
             f"[muted]Output:[/muted] {m.output_extension}"
         )

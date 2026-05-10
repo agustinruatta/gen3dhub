@@ -433,6 +433,8 @@ class ModelsScreen(_BackableScreen):
         self._show_detail(models[event.cursor_row])
 
     def _show_detail(self, model) -> None:
+        from gen3dhub.utils.system import assess_fit
+
         detail = self.query_one("#models-detail", Static)
         installed = (
             "[green]installed[/green]"
@@ -441,11 +443,24 @@ class ModelsScreen(_BackableScreen):
         )
         strengths = "\n".join(f"  • {s}" for s in model.strengths)
         weaknesses = "\n".join(f"  • {w}" for w in model.weaknesses)
+        fit = assess_fit(model.hardware)
+        fit_color, fit_icon = {
+            "ok": ("green", "✓"),
+            "warn": ("yellow", "⚠"),
+            "error": ("red", "✗"),
+        }[fit.severity]
+        fit_block = (
+            f"[bold {fit_color}]{fit_icon} On this machine[/bold {fit_color}]\n"
+            f"  {fit.headline}"
+        )
+        if fit.detail:
+            fit_block += f"\n  [dim]{fit.detail}[/dim]"
         detail.update(
             f"[b]{model.display_name}[/b]  ({installed})\n"
             f"{model.description}\n\n"
             f"[bold green]✓ Strong[/bold green]\n{strengths}\n\n"
             f"[bold yellow]✗ Weak[/bold yellow]\n{weaknesses}\n\n"
+            f"{fit_block}\n\n"
             f"[dim]Homepage:[/dim] {model.homepage}"
         )
 

@@ -409,19 +409,45 @@ def run_command(
         params=params,
         extra={"force_cpu": "1"} if cpu else {},
     )
+
+    import time
+
+    from gen3dhub import history as hist
+
     info(f"Running [model]{model_id}[/model]…")
-    produced = adapter.run(request)
+    start = time.monotonic()
+    produced: Path | None = None
+    preview_path: Path | None = None
+    exit_code = 0
+    try:
+        produced = adapter.run(request)
+        if preview and produced is not None:
+            preview_path = _try_render_preview(produced)
+    except Exception:
+        exit_code = 1
+        raise
+    finally:
+        duration = time.monotonic() - start
+        hist.append(
+            paths,
+            hist.HistoryEntry(
+                id=hist.make_id(),
+                timestamp=hist.now_iso(),
+                model=model_id,
+                inputs={k: str(v) for k, v in inputs.items()},
+                params={k: str(v) for k, v in params.items()},
+                output=str(produced) if produced is not None else None,
+                preview=str(preview_path) if preview_path is not None else None,
+                duration_s=duration,
+                exit_code=exit_code,
+            ),
+        )
 
-    if preview and produced is not None:
-        _try_render_preview(produced)
 
-
-def _try_render_preview(glb_path: Path) -> None:
-    """Render a thumbnail next to `glb_path`. Failures are warnings, never fatal.
-
-    Skipped automatically when matplotlib/trimesh aren't importable (e.g. if a
-    user pruned the host venv). The actual inference output is the source of
-    truth; the preview is purely additive UX.
+def _try_render_preview(glb_path: Path) -> Path | None:
+    """Render a thumbnail next to `glb_path`. Returns the path on success,
+    None on failure. Failures are warnings, never fatal — the actual inference
+    output is the source of truth; the preview is purely additive UX.
     """
     preview_path = glb_path.with_suffix(".preview.png")
     try:
@@ -430,8 +456,9 @@ def _try_render_preview(glb_path: Path) -> None:
         render_thumbnail(glb_path, preview_path)
     except Exception as exc:
         warn(f"Preview generation skipped: {exc}")
-        return
+        return None
     info(f"Preview: {preview_path}")
+    return preview_path
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +618,118 @@ def _launch_tui() -> None:
 def tui_command() -> None:
     """Launch the persistent interactive TUI. Same as running `gen3dhub` with no command."""
     _launch_tui()
+
+
+# ---------------------------------------------------------------------------
+# history
+# ---------------------------------------------------------------------------
+
+
+@app.command("history")
+def history_command(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit", "-n", help="How many recent entries to show. Ignored with --all."
+        ),
+    ] = 20,
+    all_: Annotated[
+        bool, typer.Option("--all", help="Show every recorded run, ignoring --limit.")
+    ] = False,
+    json_: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Emit one JSON object per line (newline-delimited). "
+                "Designed for agents and scripts."
+            ),
+        ),
+    ] = False,
+    rerun: Annotated[
+        str | None,
+        typer.Option(
+            "--rerun",
+            help=(
+                "Print the equivalent `gen3dhub run …` command for the run with "
+                "this id (or id prefix). Doesn't execute it — copy and paste to "
+                "re-run intentionally."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Show recent runs, or print a re-run command for a past run.
+
+    Reads from `~/.cache/gen3dhub/history.jsonl` (one JSON object per line).
+    """
+    import json as _json
+    import shlex
+    from dataclasses import asdict
+
+    from rich.table import Table
+
+    from gen3dhub import history as hist
+
+    paths = Paths.default()
+
+    if rerun:
+        entry = hist.find(paths, rerun)
+        if entry is None:
+            error(f"No run found matching id {rerun!r}")
+            raise typer.Exit(2)
+        cmd = ["gen3dhub", "run", "--model", entry.model]
+        for kind, value in entry.inputs.items():
+            flag = {"image": "--image", "mesh": "--mesh", "text": "--text"}.get(kind)
+            if flag:
+                cmd.extend([flag, value])
+        if entry.output:
+            cmd.extend(["--output", entry.output])
+        for key, value in entry.params.items():
+            cmd.extend(["--param", f"{key}={value}"])
+        cmd.append("--yes")
+        console.print(" ".join(shlex.quote(c) for c in cmd))
+        return
+
+    entries = hist.read_all(paths)
+    if not all_:
+        entries = entries[-limit:]
+
+    if json_:
+        for entry in entries:
+            # Print directly (not via Rich) so the output is grep/jq-friendly.
+            print(_json.dumps(asdict(entry), default=str))
+        return
+
+    if not entries:
+        info(
+            "No runs recorded yet. History accumulates as you use "
+            "`gen3dhub run`."
+        )
+        return
+
+    table = Table(title="Recent runs", header_style="bold cyan")
+    table.add_column("ID", style="muted")
+    table.add_column("When (UTC)")
+    table.add_column("Model", style="model")
+    table.add_column("Output")
+    table.add_column("Status")
+    table.add_column("Time")
+    for entry in entries:
+        status = "[green]✓[/green]" if entry.exit_code == 0 else "[red]✗[/red]"
+        out_name = Path(entry.output).name if entry.output else "-"
+        table.add_row(
+            entry.id,
+            entry.timestamp,
+            entry.model,
+            out_name,
+            status,
+            f"{entry.duration_s:.1f}s",
+        )
+    console.print(table)
+    console.print(
+        "[muted]Tip: `gen3dhub history --rerun <id>` prints the command to "
+        "re-run a past entry.[/muted]"
+    )
 
 
 @app.command("agent")

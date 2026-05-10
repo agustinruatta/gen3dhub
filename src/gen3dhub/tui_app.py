@@ -810,6 +810,15 @@ class RunScreen(_BackableScreen):
         return result
 
     def _run_inference(self, adapter, request: RunRequest, *, auto_setup: bool) -> None:
+        import time as _time
+
+        from gen3dhub import history as hist
+
+        produced: Path | None = None
+        preview_path: Path | None = None
+        exit_code = 0
+        start = _time.monotonic()
+
         with self.app.suspend():
             try:
                 if not adapter.is_installed:
@@ -823,28 +832,44 @@ class RunScreen(_BackableScreen):
                             f"call `gen3dhub setup --model {adapter.model_id}` from the shell."
                         )
                 # post_setup is idempotent and silent when already configured.
-                # Running it on every run means a user who skipped credentials
-                # the first time gets re-prompted here instead of seeing the
-                # opaque "No HF token detected" pre-run check failure.
                 adapter.post_setup(interactive=True)
                 produced = adapter.run(request)
                 # Best-effort preview alongside the GLB. Failures here never
                 # bubble up — the actual inference output is what matters.
                 if produced is not None:
-                    self._render_preview_quiet(produced)
+                    preview_path = self._render_preview_quiet(produced)
             except Exception as exc:
+                exit_code = 1
                 error(str(exc))
             input("\nPress Enter to return to the menu… ")
 
-    def _render_preview_quiet(self, glb_path: Path) -> None:
+        duration = _time.monotonic() - start
+        hist.append(
+            Paths.default(),
+            hist.HistoryEntry(
+                id=hist.make_id(),
+                timestamp=hist.now_iso(),
+                model=adapter.model_id,
+                inputs={k: str(v) for k, v in request.inputs.items()},
+                params={k: str(v) for k, v in request.params.items()},
+                output=str(produced) if produced is not None else None,
+                preview=str(preview_path) if preview_path is not None else None,
+                duration_s=duration,
+                exit_code=exit_code,
+            ),
+        )
+
+    def _render_preview_quiet(self, glb_path: Path) -> Path | None:
         preview_path = glb_path.with_suffix(".preview.png")
         try:
             from gen3dhub.utils.preview import render_thumbnail
 
             render_thumbnail(glb_path, preview_path)
-            print(f"Preview: {preview_path}", flush=True)
         except Exception as exc:
             print(f"Preview generation skipped: {exc}", flush=True)
+            return None
+        print(f"Preview: {preview_path}", flush=True)
+        return preview_path
 
     def _open_picker_for(self, target_input_selector: str) -> None:
         """Push the FilePicker modal and pipe the selected path into the given Input.

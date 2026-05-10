@@ -172,14 +172,16 @@ its own.
 Six subcommands; every option can be passed via flags (for scripts and AI
 agents) or omitted to trigger questionary prompts as a fallback:
 
-| Command  | Purpose                                                 |
-|----------|---------------------------------------------------------|
-| `list`   | Show available models with strengths, weaknesses, fit   |
-| `setup`  | Install a model (clone, venv, deps); prompt credentials |
-| `run`    | Run inference                                           |
-| `doctor` | Diagnose host + per-model installation health           |
-| `tui`    | Launch the persistent TUI (same as bare invocation)     |
-| `agent`  | Print the full agent/scripting guide as plain text      |
+| Command     | Purpose                                                 |
+|-------------|---------------------------------------------------------|
+| `list`      | Show available models with strengths, weaknesses, fit   |
+| `setup`     | Install a model (clone, venv, deps); prompt credentials |
+| `run`       | Run inference (auto-renders a 4-angle PNG preview)      |
+| `uninstall` | Remove a model's repo + venv to reclaim disk space      |
+| `doctor`    | Diagnose host + per-model installation health           |
+| `history`   | Show recent runs / re-run command for a past entry      |
+| `tui`       | Launch the persistent TUI (same as bare invocation)     |
+| `agent`     | Print the full agent/scripting guide as plain text      |
 
 ### `list` — show available models
 

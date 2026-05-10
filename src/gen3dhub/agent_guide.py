@@ -111,7 +111,32 @@ TUNABLE PARAMETERS
 DISCOVERY
   gen3dhub list                  show supported models, inputs, output ext
   gen3dhub <subcommand> --help   per-subcommand flags
+  gen3dhub history --json        machine-readable log of past runs
   gen3dhub agent                 this guide
+
+HISTORY
+  Every successful or failed `gen3dhub run` appends an entry to
+  ~/.cache/gen3dhub/history.jsonl (one JSON object per line). Useful for
+  agents that want to:
+    - check recent state without re-running anything
+    - find a past output path by id
+    - reproduce a prior call
+
+  Read the log:
+    gen3dhub history --json              # newline-delimited JSON for parsing
+    gen3dhub history --rerun <id>        # prints the equivalent CLI command
+                                         # (does NOT auto-execute — copy & run)
+  Each entry includes: id, timestamp (UTC), model, inputs, params, output
+  path, preview path, duration_s, exit_code.
+
+UNINSTALL
+  Models are big (3-10 GB each, in the per-model venv). When you're done
+  with one, free the disk:
+    gen3dhub uninstall --model <id>      # confirmation prompt
+    gen3dhub uninstall --model <id> --yes  # no prompt
+    gen3dhub uninstall --all             # remove every model
+  Hugging Face weights in ~/.cache/huggingface/ are NOT touched (shared
+  across HF tools); see `huggingface-cli scan-cache` to clean those.
 
 ENVIRONMENT VARIABLES
   HF_TOKEN, HUGGING_FACE_HUB_TOKEN

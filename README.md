@@ -10,13 +10,17 @@ extensions, etc.) coexist on the same machine without conflict.
 
 ## Supported models
 
-| ID                | Type            | Input | Output | Notes                                |
-|-------------------|-----------------|-------|--------|--------------------------------------|
-| `stable-fast-3d`  | image → 3D mesh | image | `.glb` | ~1s/asset on GPU, includes PBR textures. Gated on Hugging Face. |
-| `hunyuan3d-2`     | image → 3D mesh | image | `.glb` | Higher fidelity (DiT-based, mini 0.6B variant). ~30s/asset on GPU. Shape-only (no textures yet); fits 8 GB VRAM. Public on Hugging Face but restrictive Tencent community license — see `gen3dhub setup` notice. |
+| ID                | Type            | Input | Output | Min/Recommended VRAM | Notes |
+|-------------------|-----------------|-------|--------|----------------------|-------|
+| `stable-fast-3d`  | image → 3D mesh | image | `.glb` | 6 GB / 8 GB          | ~1s/asset on GPU, includes PBR textures. Gated on Hugging Face. |
+| `hunyuan3d-2`     | image → 3D mesh | image | `.glb` | 4 GB / 6 GB          | DiT-based, higher geometric fidelity than SF3D. ~30s/asset. Shape-only (no textures yet). Public on HF; restrictive Tencent community license. |
 
-Adding new models is a matter of writing one adapter file (see *Adding a model*
-below). The CLI surface does not need to change.
+Run **`gen3dhub list`** for the full breakdown — it shows each model's
+strengths, weaknesses, and a verdict ("comfortable" / "tight fit" / "GPU too
+small") computed against your live `nvidia-smi` reading.
+
+Adding new models is a matter of writing one adapter file (see *Adding a
+model* below). The CLI surface does not need to change.
 
 ## Requirements
 
@@ -142,26 +146,39 @@ There are two distinct ways to drive the tool:
 
 Keybindings:
 
-| Key            | Action                                    |
-|----------------|-------------------------------------------|
-| `↑` / `↓`      | Move between options / rows               |
-| `Tab` / `Shift+Tab` | Cycle focus between widgets in a form |
-| `Enter`        | Activate / submit                         |
-| `Escape`       | Go back to the previous screen            |
-| `Q`            | Back (sub-screen) / Quit (main menu)      |
-| `Ctrl+C`       | Quit immediately from anywhere            |
+| Key                      | Action                                   |
+|--------------------------|------------------------------------------|
+| `↑` / `↓`                | Move between options / form fields       |
+| `Tab` / `Shift+Tab`      | Cycle focus between widgets              |
+| `Enter`                  | Activate / submit                        |
+| `Escape` / `Q`           | Go back to the previous screen           |
+| Click **`← Back`** button | Same as Escape — every sub-screen has one in the top-left |
+| `Ctrl+C`                 | Quit immediately from anywhere           |
 
-The TUI screens are: main menu → models list, setup, run inference, doctor.
-Long-running operations (downloads, dependency installs, inference) suspend the
-TUI temporarily so the underlying tool's output (Rich progress bars, `pip`
-logs, etc.) renders normally in the terminal. When the operation finishes,
-press `Enter` to return to the menu — the app does not exit on its own.
+The TUI screens are: main menu → **models list**, **setup**, **run
+inference**, **doctor**, **agent guide**. The *run* screen also opens a
+modal **file picker** for the image and output paths (with parent-directory
+navigation via the `Up` button or `Alt+↑`).
+
+Long-running operations (downloads, dependency installs, inference) suspend
+the TUI temporarily so the underlying tool's output (Rich progress bars,
+`pip` logs, etc.) renders normally in the terminal. When the operation
+finishes, press `Enter` to return to the menu — the app does not exit on
+its own.
 
 ### CLI subcommands (non-interactive)
 
-The CLI exposes five subcommands. Every option can be passed via flags —
-convenient for scripting and AI agents — or omitted to trigger interactive
-`questionary` prompts as a fallback.
+Six subcommands; every option can be passed via flags (for scripts and AI
+agents) or omitted to trigger questionary prompts as a fallback:
+
+| Command  | Purpose                                                 |
+|----------|---------------------------------------------------------|
+| `list`   | Show available models with strengths, weaknesses, fit   |
+| `setup`  | Install a model (clone, venv, deps); prompt credentials |
+| `run`    | Run inference                                           |
+| `doctor` | Diagnose host + per-model installation health           |
+| `tui`    | Launch the persistent TUI (same as bare invocation)     |
+| `agent`  | Print the full agent/scripting guide as plain text      |
 
 ### `list` — show available models
 
@@ -201,14 +218,17 @@ gen3dhub run
 
 Flags:
 - `--model, -m` — model ID (see `list`).
-- `--image, -i` — input image path. Used by image-input models (e.g. SF3D).
+- `--image, -i` — input image path. Used by image-input models.
 - `--text, -t` — input text prompt. Used by text-input models (none yet).
-- `--output, -o` — destination path. Defaults to `./<image-stem>.glb` in the
-  current directory.
-- `--auto-setup / --no-auto-setup` — when on (default), the tool offers to
-  install the model if it isn't installed yet.
-- `--yes, -y` — skip all confirmation prompts. Use this when calling from a
-  non-interactive context.
+- `--output, -o` — destination path. Defaults to `./<image-stem>.<ext>` in
+  the current directory.
+- `--auto-setup / --no-auto-setup` — when on (default), the tool installs
+  the model if missing instead of erroring out.
+- `--yes, -y` — skip all confirmation prompts. Required for non-interactive
+  use.
+- `--cpu` — force CPU inference (10-60× slower; use when the GPU runs out
+  of VRAM, on headless servers without CUDA, or when other apps are
+  saturating the GPU).
 
 ### `doctor` — diagnose the environment
 
@@ -230,6 +250,22 @@ workflows.
 ### `tui` — explicit TUI launcher
 
 Same as running `gen3dhub` with no subcommand. Documented above.
+
+### `agent` — print the agent/scripting guide
+
+Dumps the full plain-text usage guide aimed at AI agents and scripts:
+purpose, exit codes, env vars, gated-model handling, end-to-end example,
+common don'ts. Pipe it into your agent's context, or just read it yourself
+when scripting.
+
+```bash
+gen3dhub agent          # plain text on stdout
+gen3dhub agent | less   # paginate
+```
+
+A condensed version of the same content also appears at the top of
+`gen3dhub --help`, so an agent that calls `--help` first sees the
+recommended non-interactive workflow without any extra effort.
 
 ## How it works
 
@@ -254,36 +290,19 @@ virtualenvs and are invoked through `subprocess`.
 
 Each adapter pins:
 
-- The **upstream source commit** (`git checkout <hash>` after clone), not just
-  the branch tip — so the install is repeatable across days/months even if the
-  upstream repo evolves.
-- The **runtime dependency versions** (e.g. `torch==2.4.1`,
-  `torchvision==0.19.1` for SF3D), defined as constants in the adapter file.
-- The **Python version** of the per-model venv (3.11), independent of whatever
-  Python is on the host.
+- The **upstream source commit** (`git checkout <hash>` after clone), not
+  just the branch tip — so the install is repeatable across months even if
+  the upstream repo evolves.
+- The **runtime dependency versions** (PyTorch, torchvision, …), as
+  constants at the top of the adapter file. Different adapters can pin
+  different versions because each one gets its own venv (SF3D currently
+  pins torch 2.4.1; Hunyuan3D-2 pins 2.5.1).
+- The **Python version** of the per-model venv (3.11), independent of
+  whatever Python is on the host.
 
-To upgrade a model deliberately, edit the constants at the top of the adapter
-(`_REPO_COMMIT`, `_TORCH_PACKAGES`, etc.) and run
+To upgrade a model deliberately, edit the constants at the top of the
+adapter (`_REPO_COMMIT`, `_TORCH_PACKAGES`, etc.) and run
 `gen3dhub setup --model <id> --force`.
-
-### Build isolation note (SF3D and similar models)
-
-`uv pip install` runs each package's build in an isolated sandbox by default.
-Some ML-adjacent packages — e.g. SF3D's local `texture_baker` and
-`uv_unwrapper` extensions — `import torch` from their `setup.py` without
-declaring it in `build-system.requires`. Under build isolation, the sandbox
-doesn't have torch and the wheel fails to compile (`ModuleNotFoundError: No
-module named 'torch'`).
-
-The SF3D adapter handles this with a deliberate two-pass install:
-
-1. Install `torch` + `torchvision` (pinned versions) into the venv.
-2. Install everything in `requirements.txt` with `--no-build-isolation`, so
-   that local C++/CUDA extensions can find the just-installed torch in the
-   same environment they're being built into.
-
-If you write a new adapter for a model with similar build quirks, follow the
-same pattern.
 
 ## For AI agents calling this tool
 
@@ -337,28 +356,62 @@ last `✓` line.
 
 ## Adding a model
 
-Each adapter is a single file in `src/gen3dhub/models/`.
+Each adapter is a single file in `src/gen3dhub/models/` plus a one-line
+registration. Use `stable_fast_3d.py` (canonical example with HF gating
+and custom C++ extensions) or `hunyuan3d_2.py` (no gating, simpler deps)
+as a template.
+
+### Steps
 
 1. Subclass `ModelAdapter` from `gen3dhub.models.base`.
-2. Define the `info` class attribute (`ModelInfo`): id, display name, summary,
-   homepage, license URL, declared `InputSpec`s, and the produced file
-   extension.
-3. Implement `setup(force: bool)`, `verify() -> list[str]`, and
-   `run(request: RunRequest) -> Path`.
+2. Define the `info` class attribute — a `ModelInfo` with:
+   - `id`, `display_name`
+   - `description`, `strengths`, `weaknesses` — short, used by `gen3dhub list`
+   - `hardware: HardwareNeeds` — min/recommended GPU VRAM, CPU fallback flag,
+     CPU speed hint
+   - `homepage`, `license_url`, `requires_hf_auth`
+   - `inputs: tuple[InputSpec, ...]`, `output_extension`
+3. Implement the lifecycle:
+   - `setup(force: bool)` — clone, build venv, install deps
+   - `post_setup(interactive: bool)` — *optional*, default no-op. Prompt for
+     credentials, accept licenses, etc. Idempotent — also runs on every
+     `gen3dhub run` so a user who skipped credentials gets re-prompted
+     instead of seeing an opaque pre-run failure.
+   - `verify() -> list[str]` — return human-readable problems; empty = OK
+   - `run(request: RunRequest) -> Path` — invoke inference, return output
 4. Register the adapter in `src/gen3dhub/registry.py`.
 
-The `stable-fast-3d` adapter
-(`src/gen3dhub/models/stable_fast_3d.py`) is the canonical example — it
-covers cloning a source repo, creating a `uv` venv, installing dependencies,
-verifying Hugging Face authentication, and shelling out for inference.
+### Build-isolation pattern
+
+`uv pip install` runs each package's build in an isolated sandbox by
+default. Some ML-adjacent packages (e.g. SF3D's `texture_baker` and
+`uv_unwrapper`) `import torch` from their `setup.py` without declaring it
+in `build-system.requires`, and fail to compile under build isolation
+(`ModuleNotFoundError: No module named 'torch'`).
+
+The fix used by both current adapters is a deliberate two-pass install:
+
+1. Install `torch` + `torchvision` (pinned versions) into the venv first.
+2. Install `requirements.txt` with `--no-build-isolation`, so local
+   C++/CUDA extensions can find the just-installed torch in the same env
+   they're being built into.
+
+Apply the same pattern when wrapping a model whose upstream installs
+extensions through raw `setup.py` scripts.
 
 ## Environment variables
 
-- `GEN3DHUB_CACHE_DIR` — override the location of the cache root.
+- `GEN3DHUB_CACHE_DIR` — override the location of the cache root
+  (default: `~/.cache/gen3dhub`).
 - `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face auth token. Required
   for gated models. Persistently storing the token via `gen3dhub setup`'s
   prompt or `huggingface-cli login` removes the need to set this env var on
   every shell. Setting it explicitly takes precedence over the on-disk file.
+- `PYTORCH_CUDA_ALLOC_CONF` — auto-set to `expandable_segments:True` in the
+  inference subprocess to reduce CUDA memory fragmentation on tight GPUs
+  (8 GB-class). Override by exporting it explicitly before running.
+- `CUDA_VISIBLE_DEVICES` — standard PyTorch GPU selection. Set to `""` to
+  hide all GPUs (some models will then fail; prefer `--cpu` instead).
 
 ## License
 

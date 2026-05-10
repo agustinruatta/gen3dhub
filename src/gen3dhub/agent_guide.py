@@ -61,6 +61,8 @@ THREE-STEP WORKFLOW (idempotent)
 
   3) Run inference. Inputs differ per model — pass only the flags the
      model declares. `gen3dhub list` shows each model's `Inputs` line.
+     A 4-angle PNG preview is rendered next to the output (best-effort);
+     pass `--no-preview` to skip when you don't need it (CI, batch loops).
 
      Image-input models (stable-fast-3d, hunyuan3d-2):
        gen3dhub run --model <id> --image <path> --output <path> --yes

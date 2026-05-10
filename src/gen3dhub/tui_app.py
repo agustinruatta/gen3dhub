@@ -827,10 +827,24 @@ class RunScreen(_BackableScreen):
                 # the first time gets re-prompted here instead of seeing the
                 # opaque "No HF token detected" pre-run check failure.
                 adapter.post_setup(interactive=True)
-                adapter.run(request)
+                produced = adapter.run(request)
+                # Best-effort preview alongside the GLB. Failures here never
+                # bubble up — the actual inference output is what matters.
+                if produced is not None:
+                    self._render_preview_quiet(produced)
             except Exception as exc:
                 error(str(exc))
             input("\nPress Enter to return to the menu… ")
+
+    def _render_preview_quiet(self, glb_path: Path) -> None:
+        preview_path = glb_path.with_suffix(".preview.png")
+        try:
+            from gen3dhub.utils.preview import render_thumbnail
+
+            render_thumbnail(glb_path, preview_path)
+            print(f"Preview: {preview_path}", flush=True)
+        except Exception as exc:
+            print(f"Preview generation skipped: {exc}", flush=True)
 
     def _open_picker_for(self, target_input_selector: str) -> None:
         """Push the FilePicker modal and pipe the selected path into the given Input.

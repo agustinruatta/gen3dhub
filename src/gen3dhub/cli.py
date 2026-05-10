@@ -361,6 +361,16 @@ def run_command(
             ),
         ),
     ] = None,
+    preview: Annotated[
+        bool,
+        typer.Option(
+            "--preview/--no-preview",
+            help=(
+                "Render a 4-angle PNG thumbnail next to the output GLB after a "
+                "successful run. Best-effort — preview failure never aborts the run."
+            ),
+        ),
+    ] = True,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
     import sys
@@ -400,7 +410,28 @@ def run_command(
         extra={"force_cpu": "1"} if cpu else {},
     )
     info(f"Running [model]{model_id}[/model]…")
-    adapter.run(request)
+    produced = adapter.run(request)
+
+    if preview and produced is not None:
+        _try_render_preview(produced)
+
+
+def _try_render_preview(glb_path: Path) -> None:
+    """Render a thumbnail next to `glb_path`. Failures are warnings, never fatal.
+
+    Skipped automatically when matplotlib/trimesh aren't importable (e.g. if a
+    user pruned the host venv). The actual inference output is the source of
+    truth; the preview is purely additive UX.
+    """
+    preview_path = glb_path.with_suffix(".preview.png")
+    try:
+        from gen3dhub.utils.preview import render_thumbnail
+
+        render_thumbnail(glb_path, preview_path)
+    except Exception as exc:
+        warn(f"Preview generation skipped: {exc}")
+        return
+    info(f"Preview: {preview_path}")
 
 
 # ---------------------------------------------------------------------------

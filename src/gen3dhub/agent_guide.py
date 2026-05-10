@@ -59,19 +59,52 @@ THREE-STEP WORKFLOW (idempotent)
      HF token); under an agent runner (no TTY, or invoked with `--yes`) it
      just prints a warning with the next step. So `setup` never hangs.
 
-  3) Run inference.
+  3) Run inference. Inputs differ per model — pass only the flags the
+     model declares. `gen3dhub list` shows each model's `Inputs` line.
+
+     Image-input models (stable-fast-3d, hunyuan3d-2):
        gen3dhub run --model <id> --image <path> --output <path> --yes
-     On success prints `Wrote 3D mesh -> <path>` and exits 0.
+
+     Mesh-input model (paint3d) — needs BOTH a mesh and a reference image:
+       gen3dhub run --model paint3d \\
+           --mesh <path-to-existing-mesh.glb> \\
+           --image <path-to-reference.png> \\
+           --output <path-to-textured.glb> --yes
 
      Pass `--cpu` to force CPU inference. Useful when:
        - the host has no NVIDIA GPU,
        - the GPU runs out of VRAM (CUDA OutOfMemoryError),
        - or running in CI / headless servers.
-     ~10-60x slower than GPU but always works.
+     ~10-60x slower than GPU. Note: paint3d does NOT support CPU mode
+     (upstream pipelines hard-code .to('cuda')); --cpu is silently ignored
+     for that model.
 
      gen3dhub auto-sets PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True in
      the inference subprocess to reduce CUDA fragmentation on near-the-edge
      8 GB GPUs. Override by setting the env var explicitly before invoking.
+
+TUNABLE PARAMETERS
+  Each adapter declares model-specific parameters (texture resolution,
+  remesh options, inference steps, seed, etc.). Pass them with the
+  repeatable `--param NAME=VALUE` flag:
+
+    gen3dhub run --model stable-fast-3d --image cat.png \\
+        --output cat.glb --yes \\
+        --param remesh_option=quad \\
+        --param texture_resolution=2048
+
+  Discover the parameters for a model:
+    - `gen3dhub list` prints a "⚙ Parameters" block per model (name,
+      default, choices/type).
+    - Or pass an unknown parameter to provoke a helpful error: the
+      message lists every available parameter for that model.
+
+  Validation is strict and happens before the subprocess starts:
+    - SELECT params reject values outside their `choices`.
+    - INT/FLOAT params reject unparseable strings.
+    - Unknown parameter names are rejected with the model's allowed list.
+  So a typo never reaches the underlying model — the run aborts with an
+  exit-2 (Typer usage error) and a clear message on stderr.
 
 DISCOVERY
   gen3dhub list                  show supported models, inputs, output ext
@@ -131,7 +164,7 @@ REPRODUCIBILITY GUARANTEES
   Re-running `setup` is a no-op. To deliberately upgrade, edit the adapter
   constants in src/gen3dhub/models/<id>.py and run `setup --force`.
 
-EXAMPLE — Stable Fast 3D end-to-end
+EXAMPLE — Stable Fast 3D end-to-end (single-shot textured asset)
   $ export HF_TOKEN=hf_xxx
   $ gen3dhub doctor --model stable-fast-3d
     # exits 1 if license not accepted; 0 if all good
@@ -140,8 +173,22 @@ EXAMPLE — Stable Fast 3D end-to-end
   $ gen3dhub run --model stable-fast-3d \\
       --image /tmp/cat.png \\
       --output /tmp/cat.glb \\
-      --yes
-    # exits 0; produces /tmp/cat.glb (textured GLB mesh)
+      --yes \\
+      --param remesh_option=quad \\
+      --param texture_resolution=2048
+    # exits 0; produces /tmp/cat.glb (textured GLB mesh, quad topology)
+
+EXAMPLE — Hunyuan3D-2 + Paint3D pipeline (high-fidelity geometry + textures)
+  $ gen3dhub setup --model hunyuan3d-2          # one-time
+  $ gen3dhub setup --model paint3d              # one-time, slow first run
+  $ gen3dhub run --model hunyuan3d-2 \\
+      --image /tmp/cat.png --output /tmp/cat_shape.glb --yes
+  $ gen3dhub run --model paint3d \\
+      --mesh /tmp/cat_shape.glb \\
+      --image /tmp/cat.png \\
+      --output /tmp/cat_textured.glb --yes \\
+      --param prompt="hyperrealistic photo of a cat, fur detail"
+    # final exits 0; produces /tmp/cat_textured.glb
 
 DON'T
   - Don't call bare `gen3dhub` or `gen3dhub tui` from an agent — both open

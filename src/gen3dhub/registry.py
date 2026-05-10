@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from gen3dhub.config import Paths
 from gen3dhub.models.base import ModelAdapter, ModelInfo
+from gen3dhub.models.hunyuan3d_2 import Hunyuan3D2Adapter
 from gen3dhub.models.stable_fast_3d import StableFast3DAdapter
 
 _ADAPTERS: dict[str, type[ModelAdapter]] = {
     StableFast3DAdapter.info.id: StableFast3DAdapter,
+    Hunyuan3D2Adapter.info.id: Hunyuan3D2Adapter,
 }
 
 

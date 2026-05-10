@@ -15,8 +15,11 @@ gen3dhub — usage guide for AI agents and scripts
 PURPOSE
   gen3dhub is a hub for AI models that generate 3D assets (image-to-3D,
   text-to-3D, etc.). It handles upstream source download, isolated per-model
-  install, and inference behind a uniform CLI. Currently ships with one
-  adapter: stable-fast-3d (image -> textured GLB mesh).
+  install, and inference behind a uniform CLI. Currently ships with two
+  adapters:
+    - stable-fast-3d   image -> textured GLB mesh, ~1s/asset, GATED on HF
+    - hunyuan3d-2      image -> shape GLB mesh,    ~30s/asset, public on HF
+                       (Tencent community license — restrictive; not OSI)
 
 NON-INTERACTIVE USAGE — REQUIRED FOR AGENTS
   - Pass --yes (-y) on `run` to skip ALL confirmation prompts.

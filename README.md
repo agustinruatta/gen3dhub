@@ -10,9 +10,10 @@ extensions, etc.) coexist on the same machine without conflict.
 
 ## Supported models
 
-| ID                | Type            | Input | Output |
-|-------------------|-----------------|-------|--------|
-| `stable-fast-3d`  | image → 3D mesh | image | `.glb` |
+| ID                | Type            | Input | Output | Notes                                |
+|-------------------|-----------------|-------|--------|--------------------------------------|
+| `stable-fast-3d`  | image → 3D mesh | image | `.glb` | ~1s/asset on GPU, includes PBR textures. Gated on Hugging Face. |
+| `hunyuan3d-2`     | image → 3D mesh | image | `.glb` | Higher fidelity (DiT-based, mini 0.6B variant). ~30s/asset on GPU. Shape-only (no textures yet); fits 8 GB VRAM. Public on Hugging Face but restrictive Tencent community license — see `gen3dhub setup` notice. |
 
 Adding new models is a matter of writing one adapter file (see *Adding a model*
 below). The CLI surface does not need to change.

@@ -26,8 +26,12 @@ below). The CLI surface does not need to change.
 - **uv** (`https://docs.astral.sh/uv/`) — used both to manage this project and
   the per-model isolated virtualenvs.
 - **git** — used to clone model source repositories on first install.
-- A **Hugging Face** account for gated models (e.g. Stable Fast 3D). Run
-  `huggingface-cli login` once or set `HF_TOKEN` in the environment.
+- A **Hugging Face** account for gated models (e.g. Stable Fast 3D). The
+  easiest path is running `gen3dhub setup` in an interactive terminal — its
+  post-setup hook prompts for the token (input hidden) and stores it via
+  `huggingface_hub.login()` at `~/.cache/huggingface/token` (mode 0600), the
+  canonical location every HF library reads from automatically. Alternatives:
+  `huggingface-cli login`, or `export HF_TOKEN=hf_xxx` in the shell.
 - A **GPU** with CUDA is strongly recommended for inference; CPU is supported
   as a fallback by some models (slower).
 
@@ -350,8 +354,10 @@ verifying Hugging Face authentication, and shelling out for inference.
 ## Environment variables
 
 - `GEN3DHUB_CACHE_DIR` — override the location of the cache root.
-- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face auth token. Required for
-  gated models.
+- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face auth token. Required
+  for gated models. Persistently storing the token via `gen3dhub setup`'s
+  prompt or `huggingface-cli login` removes the need to set this env var on
+  every shell. Setting it explicitly takes precedence over the on-disk file.
 
 ## License
 

@@ -478,6 +478,9 @@ class SetupScreen(_BackableScreen):
         with self.app.suspend():
             try:
                 adapter.setup(force=force)
+                # Always run post_setup — terminal is restored during suspend(),
+                # so getpass and other interactive prompts work normally.
+                adapter.post_setup(interactive=True)
             except Exception as exc:
                 error(str(exc))
             input("\nPress Enter to return to the menu… ")
@@ -611,6 +614,11 @@ class RunScreen(_BackableScreen):
                             f"disabled. Either tick the checkbox, run Setup from the menu, or "
                             f"call `gen3dhub setup --model {adapter.model_id}` from the shell."
                         )
+                # post_setup is idempotent and silent when already configured.
+                # Running it on every run means a user who skipped credentials
+                # the first time gets re-prompted here instead of seeing the
+                # opaque "No HF token detected" pre-run check failure.
+                adapter.post_setup(interactive=True)
                 adapter.run(request)
             except Exception as exc:
                 error(str(exc))

@@ -6,13 +6,14 @@ Model: https://huggingface.co/stabilityai/stable-fast-3d
 
 from __future__ import annotations
 
+import getpass
 import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from gen3dhub.console import info, success, warn
+from gen3dhub.console import error, info, success, warn
 from gen3dhub.models.base import (
     InputKind,
     InputSpec,
@@ -160,6 +161,87 @@ class StableFast3DAdapter(ModelAdapter):
             cwd=repo_dir,
             description="Installing requirements.txt without build isolation",
         )
+
+    # ---------- post-setup (credentials) ----------
+
+    def post_setup(self, *, interactive: bool) -> None:
+        """Ensure a Hugging Face token is configured and grants repo access.
+
+        SF3D weights live behind a gated repo on Hugging Face. The user must
+        (a) accept the license in a browser, (b) issue a Read token, and
+        (c) make that token available to local HF tooling.
+
+        This hook handles (c) only — (a) and (b) require human action in a
+        browser. We:
+          - skip silently if a token is already set AND it grants repo access,
+          - in interactive mode, prompt for the token (input is hidden) and
+            persist it via `huggingface_hub.login()`, which writes
+            ~/.cache/huggingface/token with mode 0600 — the canonical place
+            every HF library reads from automatically,
+          - in non-interactive mode, print a concrete next-step message and
+            return cleanly (no prompt, no crash).
+        """
+        if _hf_token_available() and _hf_can_access_repo(_HF_REPO_ID):
+            return
+
+        if not interactive:
+            warn(
+                "Stable Fast 3D needs a Hugging Face access token, but none is "
+                "configured (or it doesn't grant repo access). Set HF_TOKEN, run "
+                "`huggingface-cli login`, or run `gen3dhub setup -m stable-fast-3d` "
+                "again from an interactive terminal to be prompted."
+            )
+            return
+
+        info("")
+        info("[bold]Stable Fast 3D needs a Hugging Face token.[/bold]")
+        info(
+            f"  1. Open  https://huggingface.co/{_HF_REPO_ID}  "
+            "and click 'Agree and access repository'."
+        )
+        info(
+            "  2. Open  https://huggingface.co/settings/tokens  "
+            "and create a token with the 'Read' role."
+        )
+        info(
+            "  3. Paste the token here. It will be saved to "
+            "~/.cache/huggingface/token (mode 0600)."
+        )
+        info("")
+
+        try:
+            token = getpass.getpass("HF token (input hidden, blank to skip): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            warn("\nSkipped. Configure later with `huggingface-cli login`.")
+            return
+
+        if not token:
+            warn(
+                "Empty input — token not saved. You can still configure it later:\n"
+                "  - export HF_TOKEN=hf_xxx in your shell, or\n"
+                "  - run `huggingface-cli login`,\n"
+                "then verify with `gen3dhub doctor -m stable-fast-3d`."
+            )
+            return
+
+        try:
+            from huggingface_hub import login
+
+            login(token=token, add_to_git_credential=False)
+        except Exception as exc:
+            error(f"Failed to save token: {exc}")
+            warn("You can still set HF_TOKEN in your environment as a fallback.")
+            return
+
+        if _hf_can_access_repo(_HF_REPO_ID):
+            success("Token saved and verified — access to the gated repository confirmed.")
+        else:
+            warn(
+                "Token saved, but it does NOT grant access to "
+                f"https://huggingface.co/{_HF_REPO_ID} yet.\n"
+                "Make sure step (1) is done — accept the license on that page — "
+                "and re-run `gen3dhub doctor -m stable-fast-3d`."
+            )
 
     # ---------- verify ----------
 

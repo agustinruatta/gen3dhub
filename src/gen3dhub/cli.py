@@ -99,7 +99,14 @@ def setup_command(
         bool, typer.Option("--force", help="Reinstall even if already present.")
     ] = False,
 ) -> None:
-    """Download and install a model into an isolated, per-model environment."""
+    """Download and install a model, then prompt for any required credentials.
+
+    Idempotent: re-running with no --force is a no-op for the install side, but
+    `post_setup` is always re-evaluated so credentials can be (re)configured
+    without a full reinstall.
+    """
+    import sys
+
     paths = Paths.default()
     paths.ensure()
     model_id = model or tui.select_model("Which model do you want to install?")
@@ -113,6 +120,7 @@ def setup_command(
         )
     )
     adapter.setup(force=force)
+    adapter.post_setup(interactive=sys.stdin.isatty())
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +201,14 @@ def run_command(
     ] = False,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
+    import sys
+
     paths = Paths.default()
     paths.ensure()
+
+    # Treat --yes as "no prompts of any kind" — agents typically pair it with
+    # piped input, and a TTY check alone would be too lenient.
+    interactive = sys.stdin.isatty() and not yes
 
     model_id = model or tui.select_model()
     adapter = get_adapter(model_id, paths)
@@ -203,9 +217,15 @@ def run_command(
     if not adapter.is_installed:
         if auto_setup and (yes or tui.confirm(f"'{model_id}' is not installed. Install now?")):
             adapter.setup()
+            adapter.post_setup(interactive=interactive)
         else:
             error(f"Model '{model_id}' is not installed. Run: gen3dhub setup -m {model_id}")
             raise typer.Exit(code=1)
+    else:
+        # Re-evaluate credentials on every run — cheap and recovers from cases
+        # where the user installed earlier but skipped post-setup. Silent if
+        # already configured.
+        adapter.post_setup(interactive=interactive)
 
     inputs = _resolve_inputs(model_info, image=image, text=text)
     output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)

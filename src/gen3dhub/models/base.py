@@ -70,6 +70,27 @@ class ModelAdapter(ABC):
     def setup(self, *, force: bool = False) -> None:
         """Download weights, clone source, install dependencies into an isolated venv."""
 
+    def post_setup(self, *, interactive: bool) -> None:  # noqa: B027 — default is no-op by design
+        """Configure runtime requirements that aren't covered by `setup()` alone.
+
+        Typical examples: prompt for credentials (HF tokens, API keys), accept
+        gated-model licenses, or download per-model assets behind auth walls.
+
+        Always called after `setup()` returns successfully — even when setup
+        was a no-op because the model was already installed. So this hook is
+        the right place for checks that must stay valid across runs (e.g.
+        "is the HF token still configured?"), not just one-time post-install
+        actions.
+
+        Implementations should:
+          - return early if everything is already configured (idempotent),
+          - if `interactive=False`, only print a clear "next step" warning
+            instead of prompting (so agents and CI don't hang on hidden stdin),
+          - never raise on user-recoverable issues; surface them via `verify()`.
+
+        The default implementation does nothing.
+        """
+
     @abstractmethod
     def verify(self) -> list[str]:
         """Return a list of human-readable problems. Empty list means OK."""

@@ -45,6 +45,10 @@ THREE-STEP WORKFLOW (idempotent)
        gen3dhub setup --model <id> --force
      SF3D first install: ~5-15 minutes (clones repo, creates per-model venv,
      downloads ~1.5 GB of pinned PyTorch wheels, builds two C++ extensions).
+     After install, `setup` runs a post-setup hook that re-checks
+     credentials. Under a TTY it prompts for any missing secrets (e.g. the
+     HF token); under an agent runner (no TTY, or invoked with `--yes`) it
+     just prints a warning with the next step. So `setup` never hangs.
 
   3) Run inference.
        gen3dhub run --model <id> --image <path> --output <path> --yes
@@ -63,6 +67,13 @@ ENVIRONMENT VARIABLES
       be automated). `gen3dhub doctor` distinguishes "no token" from "token
       present but no license access" and reports the right fix.
 
+      Persistent storage: when the user runs `gen3dhub setup` in an
+      interactive terminal, post-setup will prompt for the token (input
+      hidden) and save it via `huggingface_hub.login()` to
+      ~/.cache/huggingface/token (mode 0600). All HF tools — including
+      this one — read from there automatically; no env var needed
+      afterwards. Setting HF_TOKEN at the env level overrides the file.
+
   GEN3DHUB_CACHE_DIR
       Overrides the default ~/.cache/gen3dhub root. Useful when the home
       partition is small or for sandboxed CI runs.
@@ -76,10 +87,14 @@ GATED MODELS — ONE-TIME HUMAN STEP
   download, the user must:
     1. Visit the model page (shown by `gen3dhub list` as the homepage).
     2. Click "Agree and access repository".
-    3. Set HF_TOKEN or run `huggingface-cli login`.
-  Agents cannot perform step 1-2. If `gen3dhub doctor` reports a gated-repo
-  error, surface it to the user with the exact URL and ask them to accept
-  the license, then retry.
+    3. Provide a Hugging Face access token. Three ways:
+       a) Run `gen3dhub setup -m <id>` interactively — its post-setup hook
+          prompts for the token and saves it under ~/.cache/huggingface/.
+       b) Run `huggingface-cli login`.
+       c) Set HF_TOKEN in the environment.
+  Agents cannot perform step 1-2 (browser action). If `gen3dhub doctor`
+  reports a gated-repo error, surface the model homepage URL to the user
+  and ask them to accept the license, then retry.
 
 CACHE LAYOUT
   $GEN3DHUB_CACHE_DIR (default ~/.cache/gen3dhub)

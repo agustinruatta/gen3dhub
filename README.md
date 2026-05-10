@@ -181,8 +181,14 @@ agents) or omitted to trigger questionary prompts as a fallback:
 | `uninstall` | Remove a model's repo + venv to reclaim disk space      |
 | `doctor`    | Diagnose host + per-model installation health           |
 | `history`   | Show recent runs / re-run command for a past entry      |
+| `describe`  | Emit a JSON schema of the whole tool — for agents       |
 | `tui`       | Launch the persistent TUI (same as bare invocation)     |
 | `agent`     | Print the full agent/scripting guide as plain text      |
+
+`run` accepts `--format glb|obj|ply|stl` (default: inferred from the
+output suffix, or glb). `obj` keeps PBR materials with `.mtl` + texture
+sidecars; `ply` keeps vertex colors but drops textures; `stl` is geometry
+only (3D-print friendly).
 
 For agents: pass `--json` to `gen3dhub run` to get a streaming NDJSON
 event log on stdout (subprocess output redirected to stderr). See

@@ -15,6 +15,7 @@ Designed to be fully usable in two modes:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -382,6 +383,19 @@ def run_command(
             ),
         ),
     ] = False,
+    format_: Annotated[
+        str | None,
+        typer.Option(
+            "--format",
+            help=(
+                "Output mesh format (glb / obj / ply / stl). Default: inferred "
+                "from --output suffix, falling back to glb. Adapters always "
+                "produce glb natively; non-glb is a post-conversion via trimesh. "
+                "obj keeps materials + textures (writes .mtl/.png sidecars); "
+                "ply keeps vertex colors only; stl keeps geometry only."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run inference. Missing required arguments trigger interactive prompts."""
     import sys
@@ -408,12 +422,43 @@ def run_command(
     model_info = adapter.info
 
     inputs = _resolve_inputs(model_info, image=image, text=text, mesh=mesh)
-    output_path = _resolve_output(model_info, inputs=inputs, explicit=output, yes=yes)
+
+    # Validate / resolve the output format before composing the output path,
+    # so the default filename gets the right extension.
+    from gen3dhub.utils.conversion import SUPPORTED_FORMATS, format_for_path
+
+    if format_ is not None:
+        format_ = format_.lower()
+        if format_ not in SUPPORTED_FORMATS:
+            error(
+                f"Unsupported --format {format_!r}. "
+                f"Use one of: {', '.join(SUPPORTED_FORMATS)}."
+            )
+            raise typer.Exit(2)
+    target_format = format_ or format_for_path(output, default="glb")
+
+    output_path = _resolve_output(
+        model_info, inputs=inputs, explicit=output, yes=yes, target_format=target_format
+    )
     params = _parse_params(model_info, param or [])
+
+    # Adapters write GLB; if the user wants a different format, the adapter
+    # writes to a tempfile and we convert post-hoc to the user's path.
+    native_ext = model_info.output_extension.lstrip(".")
+    needs_conversion = target_format != native_ext
+
+    if needs_conversion:
+        import tempfile
+
+        fd, tmp_str = tempfile.mkstemp(prefix="gen3dhub-out-", suffix=f".{native_ext}")
+        os.close(fd)
+        adapter_output = Path(tmp_str)
+    else:
+        adapter_output = output_path
 
     request = RunRequest(
         inputs=dict(inputs),
-        output_path=output_path,
+        output_path=adapter_output,
         params=params,
         extra={"force_cpu": "1"} if cpu else {},
     )
@@ -453,6 +498,27 @@ def run_command(
 
         with events.phase("inference", model=model_id):
             produced = adapter.run(request)
+
+        # Format conversion: adapter wrote glb (intermediate); now translate
+        # to the user's requested format at output_path. Best-effort cleanup
+        # of the intermediate either way — the user's path is the source of
+        # truth from here on.
+        if needs_conversion and produced is not None:
+            from contextlib import suppress
+
+            from gen3dhub.utils.conversion import convert_mesh
+
+            with events.phase(
+                "convert",
+                src_format=native_ext,
+                dst_format=target_format,
+                dst=str(output_path),
+            ):
+                convert_mesh(produced, output_path)
+            with suppress(OSError):
+                produced.unlink()
+            produced = output_path
+            info(f"Converted to {target_format} → {output_path}")
 
         if preview and produced is not None:
             with events.phase("preview", output=str(produced)):
@@ -613,6 +679,7 @@ def _resolve_output(
     inputs: dict[str, str | Path],
     explicit: Path | None,
     yes: bool,
+    target_format: str | None = None,
 ) -> Path:
     if explicit is not None:
         return explicit.expanduser()
@@ -629,7 +696,14 @@ def _resolve_output(
         stem = Path(str(image)).stem
     else:
         stem = "output"
-    default = Path.cwd() / f"{stem}{model_info.output_extension}"
+    # When the user passed --format, honor that for the default filename;
+    # otherwise stick with the adapter's native extension.
+    ext = (
+        f".{target_format}"
+        if target_format
+        else model_info.output_extension
+    )
+    default = Path.cwd() / f"{stem}{ext}"
 
     if yes:
         return default
@@ -839,6 +913,180 @@ def history_command(
         "[muted]Tip: `gen3dhub history --rerun <id>` prints the command to "
         "re-run a past entry.[/muted]"
     )
+
+
+# ---------------------------------------------------------------------------
+# describe — schema dump for agents
+# ---------------------------------------------------------------------------
+
+
+@app.command("describe")
+def describe_command(
+    pretty: Annotated[
+        bool,
+        typer.Option(
+            "--pretty",
+            help="Indent the JSON for human reading (default: single-line, jq-friendly).",
+        ),
+    ] = False,
+) -> None:
+    """Emit a machine-readable JSON schema of the tool: models, params, events, env.
+
+    For agents that want to introspect the tool's surface once and cache the
+    result, instead of running --help on each subcommand. Default output is
+    single-line NDJSON-compatible JSON; pass --pretty for indented output.
+
+    Includes:
+      - tool version
+      - every model's full ModelInfo (description, best_for, strengths,
+        weaknesses, hardware, inputs, params, output_extension, license)
+      - supported output formats for `run --format`
+      - exit-code contract
+      - canonical environment variables
+      - the `run --json` event vocabulary
+      - the list of CLI subcommands with one-line purposes
+    """
+    import json as _json
+    from dataclasses import asdict
+
+    from gen3dhub.utils.conversion import SUPPORTED_FORMATS
+
+    models_out = []
+    for model in list_models():
+        models_out.append(
+            {
+                "id": model.id,
+                "display_name": model.display_name,
+                "description": model.description,
+                "best_for": model.best_for,
+                "strengths": list(model.strengths),
+                "weaknesses": list(model.weaknesses),
+                "hardware": asdict(model.hardware),
+                "inputs": [
+                    {
+                        "name": spec.name,
+                        "kind": spec.kind.value,
+                        "description": spec.description,
+                        "required": spec.required,
+                    }
+                    for spec in model.inputs
+                ],
+                "output_extension": model.output_extension,
+                "params": [
+                    {
+                        "name": p.name,
+                        "label": p.label,
+                        "description": p.description,
+                        "kind": p.kind.value,
+                        "default": p.default,
+                        "choices": list(p.choices) if p.choices else None,
+                    }
+                    for p in model.params
+                ],
+                "homepage": model.homepage,
+                "license_url": model.license_url,
+                "requires_hf_auth": model.requires_hf_auth,
+            }
+        )
+
+    schema = {
+        "tool": "gen3dhub",
+        "version": __version__,
+        "commands": [
+            {
+                "name": "list",
+                "purpose": "Show supported models with strengths, weaknesses, hardware fit",
+            },
+            {"name": "setup", "purpose": "Install a model into an isolated venv"},
+            {"name": "run", "purpose": "Run inference; --json streams NDJSON events"},
+            {"name": "validate", "purpose": "Inspect a mesh file (verts, materials, manifoldness)"},
+            {"name": "uninstall", "purpose": "Remove a model's repo + venv to reclaim disk"},
+            {"name": "doctor", "purpose": "Diagnose host + per-model installation health"},
+            {"name": "history", "purpose": "Show / re-run past invocations from the JSONL log"},
+            {"name": "describe", "purpose": "Emit this JSON schema"},
+            {"name": "tui", "purpose": "Launch the persistent TUI"},
+            {"name": "agent", "purpose": "Print the agent / scripting usage guide as plain text"},
+        ],
+        "models": models_out,
+        "supported_output_formats": list(SUPPORTED_FORMATS),
+        "exit_codes": {
+            "0": "success",
+            "1": (
+                "precondition failure: missing toolchain, HF auth, license, "
+                "model not installed, etc. Read stderr for the actionable message."
+            ),
+            "2": "CLI usage error (Typer/Click) — invalid flag or value",
+            ">2": "subprocess error from a downstream tool (uv, pip, git, model inference)",
+        },
+        "environment_variables": [
+            {
+                "name": "HF_TOKEN",
+                "description": "Hugging Face access token. Required for gated models.",
+            },
+            {
+                "name": "HUGGING_FACE_HUB_TOKEN",
+                "description": "Alternate name for HF_TOKEN; both are accepted.",
+            },
+            {
+                "name": "GEN3DHUB_CACHE_DIR",
+                "description": "Override the cache root (default: ~/.cache/gen3dhub).",
+            },
+            {
+                "name": "PYTORCH_CUDA_ALLOC_CONF",
+                "description": (
+                    "Auto-set to 'expandable_segments:True' for the inference "
+                    "subprocess. Override before invocation to customize."
+                ),
+            },
+            {
+                "name": "CUDA_VISIBLE_DEVICES",
+                "description": (
+                    "Standard PyTorch GPU selection. Prefer `--cpu` over hiding "
+                    "GPUs entirely (some models crash without a visible CUDA device)."
+                ),
+            },
+        ],
+        "events": [
+            {"event": "start", "fields": ["model", "inputs", "params", "output"]},
+            {"event": "setup_start", "fields": ["model"]},
+            {"event": "setup_complete", "fields": ["model", "duration_s"]},
+            {"event": "setup_failed", "fields": ["model", "duration_s", "error", "error_type"]},
+            {"event": "post_setup_start", "fields": ["model"]},
+            {"event": "post_setup_complete", "fields": ["model", "duration_s"]},
+            {
+                "event": "post_setup_failed",
+                "fields": ["model", "duration_s", "error", "error_type"],
+            },
+            {"event": "inference_start", "fields": ["model"]},
+            {"event": "inference_complete", "fields": ["model", "duration_s"]},
+            {
+                "event": "inference_failed",
+                "fields": ["model", "duration_s", "error", "error_type"],
+            },
+            {"event": "convert_start", "fields": ["src_format", "dst_format", "dst"]},
+            {
+                "event": "convert_complete",
+                "fields": ["src_format", "dst_format", "dst", "duration_s"],
+            },
+            {"event": "convert_failed", "fields": ["duration_s", "error", "error_type"]},
+            {"event": "preview_start", "fields": ["output"]},
+            {"event": "preview_complete", "fields": ["output", "duration_s"]},
+            {"event": "preview_failed", "fields": ["output", "duration_s", "error", "error_type"]},
+            {
+                "event": "validate_complete",
+                "fields": [
+                    "path", "vertex_count", "triangle_count", "file_size_bytes",
+                    "bounding_box", "has_albedo", "has_pbr", "has_normal_map",
+                    "has_vertex_colors", "is_watertight", "is_winding_consistent",
+                    "component_count", "warnings",
+                ],
+            },
+            {"event": "done", "fields": ["exit_code", "output"]},
+        ],
+    }
+
+    indent = 2 if pretty else None
+    print(_json.dumps(schema, indent=indent, default=str))
 
 
 @app.command("agent")

@@ -109,12 +109,32 @@ TUNABLE PARAMETERS
   exit-2 (Typer usage error) and a clear message on stderr.
 
 DISCOVERY
-  gen3dhub list                  show supported models, inputs, output ext
+  gen3dhub describe              one-shot JSON schema for the whole tool
+                                 (models, params, events, exit codes, env)
+                                 — the recommended way to introspect once
+                                 and cache, instead of running --help on
+                                 each subcommand
+  gen3dhub describe --pretty     same, indented for human reading
+  gen3dhub list                  human-readable models with fit verdict
   gen3dhub <subcommand> --help   per-subcommand flags
   gen3dhub history --json        machine-readable log of past runs
-  gen3dhub validate <glb> --json metrics for a single mesh (vertex count,
-                                 materials, manifoldness, warnings)
+  gen3dhub validate <glb> --json metrics for a single mesh
   gen3dhub agent                 this guide
+
+OUTPUT FORMATS
+  Adapters produce GLB natively. To get other formats, pass `--format`:
+
+    gen3dhub run -m stable-fast-3d -i cat.png -o cat.obj --format obj
+    gen3dhub run -m stable-fast-3d -i cat.png -o cat.ply --format ply
+    gen3dhub run -m stable-fast-3d -i cat.png -o cat.stl --format stl
+
+  Without --format, the suffix of --output is honored if it's one of the
+  supported formats (glb / obj / ply / stl), otherwise glb.
+
+  Caveats per target format:
+    obj   keeps materials + textures (writes .mtl + texture PNG sidecars)
+    ply   keeps vertex colors only — drops UV-mapped textures
+    stl   geometry only — discards all color and material info
 
 STREAMING JSON DURING `run`
   Pass `--json` to gen3dhub run. Stdout becomes a pure NDJSON event stream
@@ -138,7 +158,8 @@ STREAMING JSON DURING `run`
   stream or pipe it into `jq` directly:
 
     gen3dhub run -m stable-fast-3d -i in.png -o out.glb --json | \\
-      jq -c 'select(.event == "validate_complete") | {tris: .triangle_count, manifold: .is_watertight}'
+      jq -c 'select(.event == "validate_complete")
+             | {tris: .triangle_count, manifold: .is_watertight}'
 
 HISTORY
   Every successful or failed `gen3dhub run` appends an entry to

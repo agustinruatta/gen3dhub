@@ -83,6 +83,7 @@ _PIP_PACKAGES: tuple[str, ...] = (
     "huggingface_hub>=0.30",     # follows the SD 1.5 HF redirect transparently
     "tqdm",
     "safetensors",
+    "imageio[ffmpeg]",  # stage 1's dr_eval writes an mp4 preview via imageio.mimsave
 )
 
 # Runner script: orchestrates the two upstream pipeline scripts and converts

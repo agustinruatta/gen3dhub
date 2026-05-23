@@ -52,16 +52,19 @@ _REPO_COMMIT = "08822c52fdc399b93ea00e4fa9e596344ed52ccc"
 _HF_REPO_ID = "TencentARC/InstantMesh"
 _LICENSE_URL = "https://github.com/TencentARC/InstantMesh/blob/main/LICENSE"
 
-# Upstream README pins: "Python>=3.10, PyTorch>=2.1.0, and CUDA>=12.1".
-# We match those exactly — `xformers==0.0.22.post7` requires `torch==2.1.0`,
-# and the prebuilt nvdiffrast wheels likewise expect a matching CUDA runtime.
+# Upstream README pins "PyTorch>=2.1.0 and CUDA>=12.1", but those exact
+# pins (torch==2.1.0 + cu121) only work on systems with CUDA 12.x + gcc<=12.
+# Modern hosts (CUDA 13.x toolkit + gcc 14+) fail torch's `_check_cuda_version`
+# the moment nvdiffrast tries to compile. We bump to a recent torch that
+# ships cu13 wheels so the resolver picks the variant matching the host's
+# nvcc — and we drop xformers (its 0.22 pin requires torch 2.1, and newer
+# torch already has SDPA built in, so the speed-up isn't load-bearing).
 # Each model has its own venv so this never collides with another adapter.
 _TORCH_PACKAGES: tuple[str, ...] = (
-    "torch==2.1.0",
-    "torchvision==0.16.0",
-    "torchaudio==2.1.0",
+    "torch==2.12.0",
+    "torchvision==0.27.0",
+    "torchaudio==2.11.0",
 )
-_XFORMERS_PACKAGE = "xformers==0.0.22.post7"
 
 # nvdiffrast isn't on PyPI — InstantMesh's requirements.txt installs it from
 # the NVlabs git repo. We list it explicitly here so it is installed *after*
@@ -243,11 +246,10 @@ class InstantMeshAdapter(ModelAdapter):
             info(f"Virtualenv already exists at {venv_dir}")
             return
         info(f"Creating virtualenv at {venv_dir}")
-        # InstantMesh requires Python >=3.10. We pin 3.10 because xformers
-        # 0.0.22.post7 doesn't ship wheels for newer Python versions paired
-        # with torch 2.1.0 — building from source there is finicky.
+        # InstantMesh requires Python >=3.10. Pin 3.11 for broader wheel
+        # coverage on modern torch + cu13 builds.
         run_streaming(
-            ["uv", "venv", str(venv_dir), "--python", "3.10"],
+            ["uv", "venv", str(venv_dir), "--python", "3.11"],
             description="Creating isolated virtualenv via uv",
         )
 
@@ -270,8 +272,7 @@ class InstantMeshAdapter(ModelAdapter):
 
         # Step 1: PyTorch first. The upstream README spells it out: "install
         # PyTorch first, then run pip install -r requirements.txt." nvdiffrast
-        # and xformers both `import torch` at install time and will fail
-        # without it.
+        # imports torch at install time and will fail without it.
         info(f"Installing PyTorch ({', '.join(_TORCH_PACKAGES)}) — large download")
         run_streaming(
             [
@@ -282,20 +283,7 @@ class InstantMeshAdapter(ModelAdapter):
             description="Pre-installing torch/torchvision/torchaudio into the venv",
         )
 
-        # Step 2: xformers. Upstream pins 0.0.22.post7, which requires
-        # torch==2.1.0 — installing it separately keeps any later resolver
-        # work from second-guessing the pin.
-        info(f"Installing {_XFORMERS_PACKAGE}")
-        run_streaming(
-            [
-                "uv", "pip", "install",
-                "--python", str(venv_python),
-                _XFORMERS_PACKAGE,
-            ],
-            description="Installing xformers",
-        )
-
-        # Step 3: requirements.txt. --no-build-isolation lets nvdiffrast and
+        # Step 2: requirements.txt. --no-build-isolation lets nvdiffrast and
         # any other torch-aware source builds find the already-installed
         # torch instead of failing in an isolated sandbox.
         info("Installing model dependencies (this may take several minutes)")
@@ -310,7 +298,7 @@ class InstantMeshAdapter(ModelAdapter):
             description="Installing requirements.txt without build isolation",
         )
 
-        # Step 4: ensure nvdiffrast is present even if upstream's
+        # Step 3: ensure nvdiffrast is present even if upstream's
         # requirements.txt evolves. Idempotent — uv pip skips when already
         # installed at the requested ref.
         info("Ensuring nvdiffrast is installed")

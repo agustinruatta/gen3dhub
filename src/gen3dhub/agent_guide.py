@@ -16,10 +16,12 @@ PURPOSE
   gen3dhub is a hub for AI models that generate 3D assets (image-to-3D,
   text-to-3D, mesh-to-texture, etc.). It handles upstream source download,
   isolated per-model install, and inference behind a uniform CLI.
-  Currently ships with three adapters:
+  Currently ships with four adapters:
     - stable-fast-3d   image -> textured GLB mesh, ~1s/asset, GATED on HF
     - hunyuan3d-2      image -> shape GLB mesh,    ~30s/asset, public on HF
                        (Tencent community license — restrictive; not OSI)
+    - instant-mesh     image -> textured OBJ mesh, ~30-60s/asset,
+                       Apache 2.0, public on HF, GPU-only (no CPU mode)
     - paint3d          mesh + reference image -> textured GLB,
                        ~5-10 min/asset, Apache 2.0, no CPU mode
 
@@ -64,7 +66,7 @@ THREE-STEP WORKFLOW (idempotent)
      A 4-angle PNG preview is rendered next to the output (best-effort);
      pass `--no-preview` to skip when you don't need it (CI, batch loops).
 
-     Image-input models (stable-fast-3d, hunyuan3d-2):
+     Image-input models (stable-fast-3d, hunyuan3d-2, instant-mesh):
        gen3dhub run --model <id> --image <path> --output <path> --yes
 
      Mesh-input model (paint3d) — needs BOTH a mesh and a reference image:
@@ -79,7 +81,8 @@ THREE-STEP WORKFLOW (idempotent)
        - or running in CI / headless servers.
      ~10-60x slower than GPU. Note: paint3d does NOT support CPU mode
      (upstream pipelines hard-code .to('cuda')); --cpu is silently ignored
-     for that model.
+     for that model. instant-mesh raises an explicit error when --cpu is
+     used — upstream hardcodes CUDA, so the run is rejected up front.
 
      gen3dhub auto-sets PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True in
      the inference subprocess to reduce CUDA fragmentation on near-the-edge

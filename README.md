@@ -14,6 +14,7 @@ extensions, etc.) coexist on the same machine without conflict.
 |-------------------|-----------------|---------------|--------|----------------------|-------|
 | `stable-fast-3d`  | image → 3D mesh | image         | `.glb` | 6 GB / 8 GB          | ~1s/asset, includes PBR textures + delight. Gated on Hugging Face. |
 | `hunyuan3d-2`     | image → 3D mesh | image         | `.glb` | 4 GB / 6 GB          | DiT-based, higher geometric fidelity than SF3D. ~30s/asset. Shape-only (no textures yet). Tencent community license. |
+| `instant-mesh`    | image → textured mesh | image   | `.obj` | 10 GB / 16 GB        | Zero123++ multi-view + sparse-view reconstruction; textured mesh in one pass. Apache 2.0. ~30-60s/asset. GPU-only (no CPU mode). |
 | `paint3d`         | mesh → textured mesh | mesh + image | `.glb` | 6 GB / 10 GB     | Adds textures to an existing mesh from a reference image. Apache 2.0. ~5-10 min/asset. Albedo-only (no PBR). No CPU mode. Pairs naturally with `hunyuan3d-2` for shape + texture. |
 
 Run **`gen3dhub list`** for the full breakdown — it shows each model's

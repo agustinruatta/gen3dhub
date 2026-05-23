@@ -174,15 +174,35 @@ class _BackableScreen(Screen):
         """Make Down/Up navigate the form like Tab/Shift+Tab.
 
         Inputs and Buttons don't consume Down/Up, so we intercept here and move
-        focus. We deliberately *don't* steal the keys when a Select is focused
-        — the Select needs Down to open its overlay (closed) or to navigate
-        options (open). Use Tab or Enter to leave a Select.
+        focus. Two exceptions:
+          * A *closed* Select needs Down/Up to open its overlay.
+          * An *open* Select's overlay needs Down/Up to walk through options.
+            When the overlay is open, focus sits on the SelectOverlay (an
+            OptionList), not the Select itself — so we detect it by walking
+            up the DOM. We only step focus to the next/previous form widget
+            when the highlight is already at the end (Down on last option,
+            Up on first); otherwise the overlay handles the key.
         """
         if event.key not in ("down", "up"):
             return
         focused = self.focused
         if focused is None or isinstance(focused, Select):
             return
+        select_ancestor = next(
+            (a for a in focused.ancestors_with_self if isinstance(a, Select)),
+            None,
+        )
+        if select_ancestor is not None:
+            highlighted = getattr(focused, "highlighted", None)
+            option_count = getattr(focused, "option_count", 0)
+            at_last = highlighted is not None and highlighted >= option_count - 1
+            at_first = highlighted is not None and highlighted <= 0
+            if event.key == "down" and not at_last:
+                return
+            if event.key == "up" and not at_first:
+                return
+            select_ancestor.expanded = False
+            select_ancestor.focus()
         if event.key == "down":
             self.focus_next()
         else:
